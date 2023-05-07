@@ -1,0 +1,76 @@
+module Workflow.Origination where
+
+-- | Borrowers may create and freely submit loan applications to agents. We do
+-- not limit the ability to apply in any way.
+template LoanApplication
+  with
+    borrower : Party
+    agent : Party
+    amount : Numeric 2
+  where
+    signatory borrower
+    observer agent
+
+template UnderwritingRequest
+  with
+    underwriter : Party
+    loan : LoanApplication -- Do we want to consume the loan app or refer to it by cid? Preserving the contract lets the borrower refer to it (e.g., to check status). Consuming it makes it a little harder to track, maybe. Of course, we could make the buyer an observer. 
+  where
+    signatory loan.agent
+    observer underwriter
+
+template UnderwritingResult
+  with
+    underwriter : Party
+    loan : LoanApplication -- Are we copying this around too much?
+    result : Bool -- Separate into two contracts?
+  where
+    signatory underwriter
+    observer loan.agent
+
+template LoanRequest
+  with
+    agent : Party
+    amount : Numeric 2
+    participants : [Party] -- Should we use propose/accept to add these or just have the agent provide the list up front? Do we care if the agent produces multiple loan requests for a single loan application?
+  where
+    signatory agent
+    observer participants
+
+-- Should this template be used for both P->A and A->B?
+template LoanProposal
+  with
+    -- Seems like this needs to be tied to some overall canonical transaction, so maybe we should use the loanpplication cid everywhere to tie things together.
+    participant : Party
+    agent : Party
+    amount : Numeric 2
+    rate : Decimal -- Decide on the right representation for interest rate
+    -- term? should the agent set it in advance? it might make it complicated if every lender is setting a different term
+    -- request : ContractId LoanRequest Can't use the contract id as a key!
+  where
+    signatory participant
+    observer agent
+
+template SyndicatedLoanProposal
+  with
+    agent : Party
+    borrower : Party
+    amount : Numeric 2
+    rate : Decimal
+    -- other terms: term, fees, covenants, etc.
+  where
+    signatory agent
+    observer borrower
+
+-- Should this be reused A->P?
+template LoanAgreement
+  with
+    agent : Party
+    borrower : Party
+    amount : Numeric 2
+    rate : Decimal
+    -- other terms: term, fees, covenants, etc.
+  where
+    signatory agent, borrower
+
+-- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
