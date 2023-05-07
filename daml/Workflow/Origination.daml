@@ -23,7 +23,7 @@ template UnderwritingResult
   with
     underwriter : Party
     loan : LoanApplication -- Are we copying this around too much?
-    result : Bool -- Separate into two contracts?
+    result : Bool -- Separate into two contracts? --NOTE: This could be more of a report rather than True/False, so that lenders can apply their own independent judgment about whether the risk profile fits their specific risk tolerances
   where
     signatory underwriter
     observer loan.agent
@@ -32,7 +32,7 @@ template LoanRequest
   with
     agent : Party
     amount : Numeric 2
-    participants : [Party] -- Should we use propose/accept to add these or just have the agent provide the list up front? Do we care if the agent produces multiple loan requests for a single loan application?
+    participants : [Party] -- Should we use propose/accept to add these or just have the agent provide the list up front? Do we care if the agent produces multiple loan requests for a single loan application? --NOTE: I think this ought to be done one agent to one lender rather than in a batch, because, during the bookbuilding process, the agent may not want to reveal who has been solicited, especially if they said "no". --NOTE: Somehow this needs to be linked to the underwriting result.
   where
     signatory agent
     observer participants
@@ -45,7 +45,7 @@ template LoanProposal
     agent : Party
     amount : Numeric 2
     rate : Decimal -- Decide on the right representation for interest rate
-    -- term? should the agent set it in advance? it might make it complicated if every lender is setting a different term
+    -- term? should the agent set it in advance? it might make it complicated if every lender is setting a different term -- yeah, should include a schedule of payments, which could be kind of complicated and should probably be be based on https://docs.daml.com/daml-finance/reference/code-documentation/daml-finance-rst/Daml-Finance-Interface-Types-Date-Schedule.html ; maybe should be set in the LoanRequest
     -- request : ContractId LoanRequest Can't use the contract id as a key!
   where
     signatory participant
@@ -58,6 +58,7 @@ template SyndicatedLoanProposal
     amount : Numeric 2
     rate : Decimal
     -- other terms: term, fees, covenants, etc.
+    --NOTE: Maybe a covenant, once agreed by the borrower, could actually grant access to some on-chain data in the future, which is necessary to enforce it. and this could also trigger on-chain modifications of the loan.
   where
     signatory agent
     observer borrower
