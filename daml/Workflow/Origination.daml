@@ -63,15 +63,16 @@ template SyndicatedLoanProposal
     signatory agent
     observer borrower
 
--- Should this be reused A->P?
+-- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
 template LoanAgreement
   with
     agent : Party
+    participants : [Party]
     borrower : Party
     amount : Numeric 2
     rate : Decimal
     -- other terms: term, fees, covenants, etc.
   where
-    signatory agent, borrower
+    signatory agent, borrower, participants
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
