@@ -26,6 +26,10 @@ import qualified DA.Set as S
 import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
 import Daml.Finance.Settlement.Factory (Factory(..))
 
+import Daml.Finance.Interface.Settlement.Batch qualified as Batch (I)
+import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (I)
+import Daml.Finance.Interface.Settlement.Types (Step(..))
+
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
 -- and divulgence.
@@ -180,7 +184,7 @@ type Amount = Numeric 2
 
 makeUnderwritingResult
     : Party
-    -> ContractId UnderwritingRequest 
+    -> ContractId UnderwritingRequest
     -> Script (ContractId UnderwritingResult)
 makeUnderwritingResult underwriter requestCid = do
     Some request <- queryContractId underwriter requestCid
@@ -271,7 +275,8 @@ acceptLoanProposal borrower offerCid = do
 servicing LedgerParties{..} loan = do
   pure ()
 
-settleLoan LedgerParties {..} loan = do
+settleLoan : LedgerParties -> LoanAgreement -> Script ()
+settleLoan LedgerParties {..} loanAgreement = do
   -- 1. Create Route Provider
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
       createCmd SingleCustodian.SingleCustodian with
@@ -286,18 +291,108 @@ settleLoan LedgerParties {..} loan = do
       observers = S.fromList [borrower_bob, borrower_alice]
 
   -- TODO: This is the part where you begin to construct
+  -- 1: All lenders send funds to Agent
+  -- 2: Agent sends funds to borrower
 
-  -- dvpProposalCid <- submit bob do
-  --   createCmd DvP.Proposal with
-  --     id = "xccy trade"
-  --     recQuantity = qty 10.0 tokenInstrument
-  --     payQuantity = qty 1000.0 usdInstrument
-  --     proposer = bob
-  --     counterparty = alice
-  --     routeProviderCid
-  --     settlementFactoryCid
+  settlementProposalCid <- submit agent_charlie do
+    createCmd SettlementProposal with
+      loan = loanAgreement
+      sigAccumulator = []
+      routeProviderCid
+      settlementFactoryCid
 
-  -- (batchCid, recSettleInstructionCid, paySettleInstructionCid) <- submit alice do
-  --   exerciseCmd dvpProposalCid DvP.Accept
+  (batchCid, recSettleInstructionCid, paySettleInstructionCid) <- submit borrower_alice do
+    exerciseCmd settlementProposalCid Borrower_Accept
 
   return ()
+
+
+template SettlementProposal
+  with
+    loan : LoanAgreement
+    sigAccumulator: [Party] -- Acquire acceptance from all parties
+    routeProviderCid : ContractId RouteProvider.I
+    settlementFactoryCid : ContractId Settlement.F
+  where
+    signatory loan.agent
+    observer loan.borrower::(map fst $ Map.toList loan.participantsWithAmount)
+    choice Accept_Borrower : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
+      controller loan.borrower
+      do
+        let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmount)
+        if sigAccumulator == lendersAndBorrowers then do
+          -- TODO: DRY
+          -- Settlement of lenders
+          let lenderSteps = fmap loan.participantsWithAmount $ \(lender, investAmount) ->
+                Step with sender = lender; receiver = loan.agent; quantity = investAmount
+          -- Settlement of borrower
+              borrowerStep =
+                Step with sender = loan.agent; receiver = loan.borrower; quantity = loan.loanTerms.amount
+
+          -- Discover settlement routes for the steps
+          routedSteps <- exercise routeProviderCid RouteProvider.Discover with
+            discoverors = fromList $ loan.agent::lendersAndBorrowers
+            contextId = None
+            steps = borrowerStep::lenderSteps
+
+          -- Instruct settlement
+          (containerCid, [recInstructionCid, payInstructionCid]) <-
+            exercise settlementFactoryCid Settlement.Instruct with
+              instructors = fromList $ loan.agent::lendersAndBorrowers
+              settlers = singleton loan.agent
+              id = Id id
+              description = "Settlement for " <> id
+              contextId = None
+              routedSteps
+              settlementTime = None -- i.e., immediate settlement
+
+          return $ Some (containerCid, recInstructionCid, payInstructionCid)
+
+        else do
+          create this with sigAccumulator = loan.borrower::sigAccumulator
+          return None
+    choice Accept_Lender : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
+      controller (map fst $ Map.toList loan.participantsWithAmount)
+      do
+        if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmount) then do
+          -- TODO: DRY
+          -- Settlement of lenders
+          let lenderSteps = fmap loan.participantsWithAmount $ \(lender, investAmount) ->
+                Step with sender = lender; receiver = loan.agent; quantity = investAmount
+          -- Settlement of borrower
+              borrowerStep =
+                Step with sender = loan.agent; receiver = loan.borrower; quantity = loan.loanTerms.amount
+
+          -- Discover settlement routes for the steps
+          routedSteps <- exercise routeProviderCid RouteProvider.Discover with
+            discoverors = fromList $ loan.agent::lendersAndBorrowers
+            contextId = None
+            steps = borrowerStep::lenderSteps
+
+          -- Instruct settlement
+          (containerCid, [recInstructionCid, payInstructionCid]) <-
+            exercise settlementFactoryCid Settlement.Instruct with
+              instructors = fromList $ loan.agent::lendersAndBorrowers
+              settlers = singleton loan.agent
+              id = Id id
+              description = "Settlement for " <> id
+              contextId = None
+              routedSteps
+              settlementTime = None -- i.e., immediate settlement
+
+          return $ Some (containerCid, recInstructionCid, payInstructionCid)
+
+        -- add the current choice controller to the list of acquired signatures
+        else do
+          create this with sigAccumulator = choiceController::sigAccumulator
+          return None
+
+    choice Decline : ()
+      -- ^ Decline the request.
+      controller counterparty
+      do pure ()
+
+    choice Withdraw : ()
+      -- ^ Withdraw the request.
+      controller proposer
+      do pure ()
