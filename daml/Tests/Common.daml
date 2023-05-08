@@ -65,11 +65,12 @@ preOrigination LedgerParties{..} = do
     holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
       createCmd Fungible.Factory with
         provider = fed_ingrid
-        observers = empty -- fromList [("PublicObserver", singleton public )]
+        observers = empty -- fromList [("PublicObserver", singleton public )] -- TODO: Probably wont need this
 
     -- ...for Hortenses's Bank
     hortenseRequestCid <- submit lender_hortense do
       createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
+
     hortenseAccount <- submit fed_ingrid do
       exerciseCmd hortenseRequestCid CreateAccount.Accept with
         label = "Hortense@Bank"
