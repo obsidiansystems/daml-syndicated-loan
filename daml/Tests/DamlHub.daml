@@ -1,7 +1,15 @@
-module DamlHub where
+module Tests.DamlHub where
 
-import Common
+import Tests.Common
 import Daml.Script
 
 initialTestHub : LedgerParties -> Script ()
 initialTestHub parties = initialTest parties
+
+{-
+    Make a Daml Script that runs every availble test against the live ledger
+    ALL Tests should be added to here, as long as they don't require allocateParty
+-}
+runAllTests : LedgerParties -> Script ()
+runAllTests LedgerParties{..} = do
+    pure ()

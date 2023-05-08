@@ -1,6 +1,6 @@
-module IDE where
+module Tests.IDE where
 
-import Common
+import Tests.Common
 import Daml.Script
 
 createParties : Script LedgerParties

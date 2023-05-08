@@ -1,12 +1,43 @@
 module Workflow.Origination where
 
--- | Borrowers may create and freely submit loan applications to agents. We do
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(..))
+import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFrequency(..), SchedulePeriod(..), PeriodicSchedule(..))
+import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
+import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
+import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(Act360))
+import DA.Map (Map)
+import qualified DA.Map as Map
+import qualified DA.Set as Set
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..))
+import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(NoRollConvention), Period(..))
+import DA.Date (addDays, toDateUTC)
+type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
+
+-- ### TODO
+--   * Include "start date" of the loan (used to calculate coupon payment dates)
+--      * Equal to the day at which the loan principal amount is transferred to the borrower.
+--   * Figure out what to use as the output of this step to be used as input to the servicing process.
+--   * Use daml-finance types for specifying e.g. coupon payment schedule (cf. https://docs.daml.com/daml-finance/reference/code-documentation/daml-finance-rst/Daml-Finance-Instrument-Bond-FixedRate-Instrument.html)
+--      * Maybe just include the payment schedule in the final output of this whole process (to be used as input for the servicing process)
+
+-- | Rate per annum.
+-- E.g. "3.5% per annum" is represented as 0.035
+newtype RatePerAnnum = RatePerAnnum { unRatePerAnnum : Decimal }
+  deriving (Eq, Show)
+
+-- | An application for a loan by a borrower
+-- NOTE: Borrowers may create and freely submit loan applications to agents. We do
 -- not limit the ability to apply in any way.
 template LoanApplication
   with
     borrower : Party
     agent : Party
     amount : Numeric 2
+    durationYears : Int  -- ^ Number of years
+    maxInterestRate : RatePerAnnum
+    prospectus : Text
+    -- ^ an explanation, by the borrower, of what the loan will be used for
+    -- TODO: The lenders (not just the underwriter) want to see the prospectus too
   where
     signatory borrower
     observer agent
@@ -14,65 +45,175 @@ template LoanApplication
 template UnderwritingRequest
   with
     underwriter : Party
-    loan : LoanApplication -- Do we want to consume the loan app or refer to it by cid? Preserving the contract lets the borrower refer to it (e.g., to check status). Consuming it makes it a little harder to track, maybe. Of course, we could make the buyer an observer. 
+    uuid : Text -- Generated client-side by the agent so that each 'LoanApplication' has unique ID. We could also use a 'ContractId LoanApplication' to be the unique ID for a 'UnderwritingRequest', but the borrower has the ability to archive the LoanApplication, and we don't want to give the borrower the ability to delete a piece of data that is referred to by contracts involving other parties.
+    loan : LoanApplication -- See comment above
   where
     signatory loan.agent
     observer underwriter
+    key (loan.agent, uuid) : (Party, Text)
+    maintainer key._1
 
 template UnderwritingResult
   with
     underwriter : Party
-    loan : LoanApplication -- Are we copying this around too much?
-    result : Bool -- Separate into two contracts? --NOTE: This could be more of a report rather than True/False, so that lenders can apply their own independent judgment about whether the risk profile fits their specific risk tolerances
+    agent : Party
+    uuid : Text
+    result : Bool
   where
     signatory underwriter
-    observer loan.agent
+    observer agent
+    key (underwriter, agent, uuid) : (Party, Party, Text)
+    maintainer key._1
 
+    nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
+      with
+        disclose_to : Party
+      controller agent 
+      do
+        create UnderwritingDisclosure with
+          underwriting = this
+          participant = disclose_to
+
+template UnderwritingDisclosure
+  with
+    underwriting : UnderwritingResult
+    participant : Party
+  where
+    signatory underwriting.underwriter, underwriting.agent
+    observer participant
+
+-- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
 template LoanRequest
   with
     agent : Party
-    amount : Numeric 2
-    participants : [Party] -- Should we use propose/accept to add these or just have the agent provide the list up front? Do we care if the agent produces multiple loan requests for a single loan application? --NOTE: I think this ought to be done one agent to one lender rather than in a batch, because, during the bookbuilding process, the agent may not want to reveal who has been solicited, especially if they said "no". --NOTE: Somehow this needs to be linked to the underwriting result.
+    uuid : Text
+    underwrite : ContractId UnderwritingDisclosure
+    totalApplicationAmount : Numeric 2
+    -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
+    participant : Party
+    -- ^ The agent creates one 'LoanRequest' for each participant from whom it wants an offer
   where
     signatory agent
-    observer participants
+    observer participant
+    key (agent, participant, uuid) : (Party, Party, Text)
+    maintainer key._1
 
--- Should this template be used for both P->A and A->B?
-template LoanProposal
+-- | An offer by a participant to loan part (or all of) of the amount specified by the LoanApplication
+template LoanOffer
   with
-    -- Seems like this needs to be tied to some overall canonical transaction, so maybe we should use the loanpplication cid everywhere to tie things together.
-    participant : Party
     agent : Party
+    uuid : Text
+    participant : Party
     amount : Numeric 2
-    rate : Decimal -- Decide on the right representation for interest rate
-    -- term? should the agent set it in advance? it might make it complicated if every lender is setting a different term -- yeah, should include a schedule of payments, which could be kind of complicated and should probably be be based on https://docs.daml.com/daml-finance/reference/code-documentation/daml-finance-rst/Daml-Finance-Interface-Types-Date-Schedule.html ; maybe should be set in the LoanRequest
-    -- request : ContractId LoanRequest Can't use the contract id as a key!
+    rate : RatePerAnnum
+    -- TODO: for now we just reject offers that are greater than LoanApplication.maxInterestRate, but eventually we'd like to accept all offers that makes it possible for the agent to offer a final loan of less than or equal to LoanApplication.maxInterestRate.
   where
     signatory participant
     observer agent
+    key (participant, agent, uuid) : (Party, Party, Text)
+    maintainer key._1
 
-template SyndicatedLoanProposal
+template SyndicatedLoanOffer
   with
     agent : Party
+    uuid : Text
     borrower : Party
     amount : Numeric 2
-    rate : Decimal
+    rate : RatePerAnnum
     -- other terms: term, fees, covenants, etc.
     --NOTE: Maybe a covenant, once agreed by the borrower, could actually grant access to some on-chain data in the future, which is necessary to enforce it. and this could also trigger on-chain modifications of the loan.
   where
     signatory agent
     observer borrower
+    key (agent, uuid) : (Party, Text)
+    maintainer key._1
+
+data LoanTerms = LoanTerms with
+    amount : Numeric 2 -- Principal. TODO: for now always equal to LoanApplication.amount
+    rate : RatePerAnnum
+    -- ^ The interest amount paid by the borrower yearly is (amount * rate).
+    -- ^ TODO: for now this is always equal to LoanApplication.maxInterestRate, but we want this to become an amount-weighted average of offered participant rates
+    durationYears : Int
+    -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
+      deriving (Eq, Show)
+
+template AcceptedLoan
+  with
+    agent : Party
+    borrower : Party
+    amount : Numeric 2
+    rate : RatePerAnnum
+  where
+    signatory borrower
+    observer agent
 
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
 template LoanAgreement
   with
     agent : Party
-    participants : [Party]
+    participantsWithAmount : Map Party (Numeric 2)
     borrower : Party
-    amount : Numeric 2
-    rate : Decimal
-    -- other terms: term, fees, covenants, etc.
+    uuid : Text -- Points to UnderwritingRequest.uuid
+    prospectus : Text
+    loanTerms : LoanTerms
   where
-    signatory agent, borrower, participants
+    signatory agent, borrower, Map.keys participantsWithAmount
+
+template PendingLoanAgreement
+  with
+    agreement : LoanAgreement
+    signed : [Party]
+  where
+    -- TODO: ensure clause
+    signatory agreement.agent, signed
+    observer Map.keys agreement.participantsWithAmount
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
+
+-- NOTE: pays to agent for now. TODO: pay to participants
+loanAgreementToBond
+  :  Time -- Current time
+  -> InstrumentKey -- USD
+  -> LoanAgreement
+  -> Bond
+loanAgreementToBond now usd a =
+  Instrument with
+    depository = a.agent -- same as agent for now
+    issuer = a.borrower
+    id = Id a.uuid
+    version = "0"
+    description = "Fixed-rate bond"
+    couponRate = unRatePerAnnum a.loanTerms.rate
+    periodicSchedule = schedule
+    holidayCalendarIds = [] -- NOT USED!
+    calendarDataProvider = a.agent -- NOT USED!
+    dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
+    currency = usd
+    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithAmount))
+    lastEventTimestamp = error "TODO"
+  where
+    startDate = toDateUTC now
+
+    schedule = PeriodicSchedule with
+      effectiveDate = startDate
+
+      terminationDate = addDays startDate (365 * a.loanTerms.durationYears)  -- TODO: for now just equal to 'effectiveDate' with 'a.loanTerms.durationYears' multiplied by 365 added to the year. However, this calculation depends on 'dayCountConvention'
+
+      firstRegularPeriodStartDate = None -- TODO: what is a "regular" period?
+
+      lastRegularPeriodEndDate = None
+
+      frequency = Periodic $ Frequency with -- one time per year
+        period = (Period with period = Y; periodMultiplier = 1)
+        rollConvention = NoRollConvention
+
+      businessDayAdjustment = -- NOT USED
+        BusinessDayAdjustment with
+          calendarIds = []
+          convention = NoAdjustment
+
+      effectiveDateBusinessDayAdjustment = None
+
+      terminationDateBusinessDayAdjustment = None
+
+      stubPeriodType = None
