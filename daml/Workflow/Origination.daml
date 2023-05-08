@@ -10,6 +10,8 @@ import qualified DA.Set as Set
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(NoRollConvention), Period(..))
 import DA.Date (addDays, toDateUTC)
+import DA.Set (Set)
+import DA.Assert
 type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 
 -- ### TODO
@@ -22,7 +24,7 @@ type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 -- | Rate per annum.
 -- E.g. "3.5% per annum" is represented as 0.035
 newtype RatePerAnnum = RatePerAnnum { unRatePerAnnum : Decimal }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 -- | An application for a loan by a borrower
 -- NOTE: Borrowers may create and freely submit loan applications to agents. We do
@@ -41,6 +43,18 @@ template LoanApplication
     signatory borrower
     observer agent
 
+    choice CreateUnderwritingRequest : ContractId UnderwritingRequest
+      with
+        underwriter : Party
+        uuid : Text
+      controller agent
+
+      do
+        create UnderwritingRequest with
+          underwriter
+          uuid
+          loan = error "TODO"
+
 template UnderwritingRequest
   with
     underwriter : Party
@@ -52,6 +66,17 @@ template UnderwritingRequest
     key (loan.agent, uuid) : (Party, Text)
     maintainer key._1
 
+    choice CreateUnderwritingResult : ContractId UnderwritingResult
+      with
+        result : Bool
+      controller underwriter
+      do
+        create UnderwritingResult with
+          underwriter
+          agent = loan.agent
+          uuid
+          result
+
 template UnderwritingResult
   with
     underwriter : Party
@@ -60,15 +85,29 @@ template UnderwritingResult
     result : Bool
   where
     signatory underwriter
-    observer agent
+    observer agent -- TODO: participants must be able to view
     key (agent, uuid) : (Party, Text)
     maintainer key._1
+
+    choice CreateLoanRequest : ContractId LoanRequest
+      with
+        participant : Party
+      controller agent
+      do
+        (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (agent, uuid)
+        create LoanRequest with
+          agent
+          uuid
+          totalApplicationAmount = underwritingRequest.loan.amount
+          participant
+          underwritingResult = result
 
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
 template LoanRequest
   with
     agent : Party
     uuid : Text
+    underwritingResult : Bool
     totalApplicationAmount : Numeric 2
     -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
     participant : Party
@@ -78,6 +117,19 @@ template LoanRequest
     observer participant
     key (agent, uuid) : (Party, Text)
     maintainer key._1
+
+    choice CreateLoanOffer : ContractId LoanOffer
+      with
+        amount : Numeric 2
+        rate : RatePerAnnum
+      controller participant
+      do
+        create LoanOffer with
+          agent
+          uuid
+          participant
+          amount
+          rate
 
 -- | An offer by a participant to loan part (or all of) of the amount specified by the LoanApplication
 template LoanOffer
@@ -94,13 +146,54 @@ template LoanOffer
     key (agent, uuid) : (Party, Text)
     maintainer key._1
 
+template SyndicatedLoanOfferCollector
+  with
+    agent : Party
+    uuid : Text
+    targetAmount : Numeric 2
+    satisfiedAmount : Numeric 2
+    loanOffers : [LoanOffer]
+  where
+    signatory agent
+    key (agent, uuid) : (Party, Text)
+    maintainer key._1
+
+    choice AcceptLoanOffer : ContractId SyndicatedLoanOfferCollector
+      with
+        loanOffer : LoanOffer
+      controller agent
+      do
+        assertMsg ("loan targetAmount " <> show targetAmount <> " already satisfied: " <> show satisfiedAmount) $
+          satisfiedAmount < targetAmount
+        loanOffer.agent === agent
+        loanOffer.uuid === uuid
+        let actualLoanAmount = min loanOffer.amount (targetAmount - satisfiedAmount)
+        pure SyndicatedLoanOfferCollector with
+          agent
+          uuid
+          targetAmount
+          satisfiedAmount = satisfiedAmount + actualLoanAmount
+          loanOffers = loanOffer{amount = actualLoanAmount} :: loanOffers -- TODO: how to make the modified LoanOffer visible to participant
+
+    choice CreateSyndicatedLoanOffer : ContractId SyndicatedLoanOffer
+      controller agent
+      do
+        satisfiedAmount === targetAmount
+        (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (agent, uuid)
+        create SyndicatedLoanOffer with
+          agent
+          uuid
+          borrower = underwritingRequest.loan.borrower
+          amount = targetAmount
+          rate = underwritingRequest.loan.maxInterestRate
+
 template SyndicatedLoanOffer
   with
     agent : Party
     uuid : Text
     borrower : Party
     amount : Numeric 2
-    rate : Decimal
+    rate : RatePerAnnum
     -- other terms: term, fees, covenants, etc.
     --NOTE: Maybe a covenant, once agreed by the borrower, could actually grant access to some on-chain data in the future, which is necessary to enforce it. and this could also trigger on-chain modifications of the loan.
   where
