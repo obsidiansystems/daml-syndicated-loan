@@ -7,7 +7,6 @@ import Daml.Script
 -- INTERFACE DEPENDENCIES --
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
 import Daml.Finance.Interface.Instrument.Base.Instrument qualified as Instrument
-import Daml.Finance.Interface.Util.Disclosure qualified as Disclosure
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
 import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (Allocate(..), Approve(..))
@@ -18,8 +17,7 @@ import Daml.Finance.Interface.Util.Common (qty)
 
 -- IMPLEMENTATION DEPENDENCIES --
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument qualified as FR
--- import Daml.Finance.Interface.Instrument.Bond.FixedRate.Instrument qualified as FR
-import Daml.Finance.Interface.Instrument.Bond.FixedRate.Instrument (Instrument(..))
+--import Daml.Finance.Interface.Instrument.Bond.FixedRate.Instrument qualified as FR
 import Daml.Finance.Settlement.Factory (Factory(..))
 import Daml.Finance.Settlement.RouteProvider.SingleCustodian (SingleCustodian(..))
 

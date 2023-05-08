@@ -1,12 +1,16 @@
 module Workflow.Origination where
 
-import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..))
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(..))
+import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFrequency(..), SchedulePeriod(..), PeriodicSchedule(..))
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
 import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
 import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(Act360))
 import DA.Map (Map)
 import qualified DA.Map as Map
 import qualified DA.Set as Set
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..))
+import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(NoRollConvention), Period(..))
+import DA.Date (addDays, toDateUTC)
 type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 
 -- ### TODO
@@ -29,7 +33,7 @@ template LoanApplication
     borrower : Party
     agent : Party
     amount : Numeric 2
-    duration : Int  -- ^ Number of years
+    durationYears : Int  -- ^ Number of years
     maxInterestRate : RatePerAnnum
     prospectus : Text
     -- ^ an explanation, by the borrower, of what the loan will be used for
@@ -129,7 +133,7 @@ data LoanTerms = LoanTerms with
     rate : RatePerAnnum
     -- ^ The interest amount paid by the borrower yearly is (amount * rate).
     -- ^ TODO: for now this is always equal to LoanApplication.maxInterestRate, but we want this to become an amount-weighted average of offered participant rates
-    duration : Int
+    durationYears : Int
     -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
       deriving (Eq, Show)
 
@@ -168,10 +172,11 @@ template PendingLoanAgreement
 
 -- NOTE: pays to agent for now. TODO: pay to participants
 loanAgreementToBond
-  :  Party -- the Fed (the issuer and depository of USD)
+  :  Time -- Current time
+  -> InstrumentKey -- USD
   -> LoanAgreement
   -> Bond
-loanAgreementToBond fed a =
+loanAgreementToBond now usd a =
   Instrument with
     depository = a.agent -- same as agent for now
     issuer = a.borrower
@@ -179,7 +184,7 @@ loanAgreementToBond fed a =
     version = "0"
     description = "Fixed-rate bond"
     couponRate = unRatePerAnnum a.loanTerms.rate
-    periodicSchedule = undefined
+    periodicSchedule = schedule
     holidayCalendarIds = [] -- NOT USED!
     calendarDataProvider = a.agent -- NOT USED!
     dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
@@ -187,8 +192,28 @@ loanAgreementToBond fed a =
     observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithAmount))
     lastEventTimestamp = error "TODO"
   where
-    usd = InstrumentKey with
-      depository = fed
-      issuer = fed
-      id = Id "USD"
-      version = "0"
+    startDate = toDateUTC now
+
+    schedule = PeriodicSchedule with
+      effectiveDate = startDate
+
+      terminationDate = addDays startDate (365 * a.loanTerms.durationYears)  -- TODO: for now just equal to 'effectiveDate' with 'a.loanTerms.durationYears' multiplied by 365 added to the year. However, this calculation depends on 'dayCountConvention'
+
+      firstRegularPeriodStartDate = None -- TODO: what is a "regular" period?
+
+      lastRegularPeriodEndDate = None
+
+      frequency = Periodic $ Frequency with -- one time per year
+        period = (Period with period = Y; periodMultiplier = 1)
+        rollConvention = NoRollConvention
+
+      businessDayAdjustment = -- NOT USED
+        BusinessDayAdjustment with
+          calendarIds = []
+          convention = NoAdjustment
+
+      effectiveDateBusinessDayAdjustment = None
+
+      terminationDateBusinessDayAdjustment = None
+
+      stubPeriodType = None
