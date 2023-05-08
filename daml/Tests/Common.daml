@@ -265,12 +265,7 @@ createLoanProposal agent borrower amount rate = createCmd SyndicatedLoanOffer wi
 
 acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoan)
 acceptLoanProposal borrower offerCid = do
-  Some offer <- queryContractId borrower offerCid
-  submit borrower $ createCmd AcceptedLoan with
-    agent = offer.agent
-    borrower
-    amount = offer.amount
-    rate = offer.rate
+  submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
 -- TODO: This will take a LoanAgreement once we have multi-party signing implemented
 servicing : LedgerParties -> ContractId LoanAgreement -> Script ()

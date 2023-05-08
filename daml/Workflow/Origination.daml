@@ -195,6 +195,15 @@ template SyndicatedLoanOffer
     observer borrower
     key (agent, uuid) : (Party, Text)
     maintainer key._1
+    choice SyndicatedLoanOffer_Accept : ContractId AcceptedLoan
+      controller borrower
+      do
+        create AcceptedLoan with
+          agent
+          borrower
+          amount
+          rate
+
 
 data LoanTerms = LoanTerms with
     amount : Numeric 2 -- Principal. TODO: for now always equal to LoanApplication.amount
