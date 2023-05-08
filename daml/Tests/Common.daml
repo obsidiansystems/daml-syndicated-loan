@@ -30,6 +30,7 @@ import Daml.Finance.Settlement.Factory (Factory(..))
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (I)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (I)
 import Daml.Finance.Interface.Settlement.Types (Step(..))
+import DA.Set (singleton)
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -307,8 +308,10 @@ settleLoan LedgerParties {..} loanAgreement = do
       routeProviderCid
       settlementFactoryCid
 
-  (batchCid, recSettleInstructionCid, paySettleInstructionCid) <- submit borrower_alice do
-    exerciseCmd settlementProposalCid Borrower_Accept
+  -- (batchCid, recSettleInstructionCid, paySettleInstructionCid) <- submit borrower_alice do
+  --   exerciseCmd settlementProposalCid Accept_Borrower
+  settlementRes <- submit borrower_alice do
+    exerciseCmd settlementProposalCid Accept_Borrower
 
   return ()
 
@@ -321,15 +324,16 @@ template SettlementProposal
     settlementFactoryCid : ContractId Settlement.F
   where
     signatory loan.agent
-    observer loan.borrower::(map fst $ Map.toList loan.participantsWithAmount)
+    observer loan.borrower::(map fst $ Map.toList loan.participantsWithTerms)
     choice Accept_Borrower : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
       controller loan.borrower
       do
-        let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmount)
+        let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithTerms)
+            id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         if sigAccumulator == lendersAndBorrowers then do
           -- TODO: DRY
           -- Settlement of lenders
-          let lenderSteps = fmap loan.participantsWithAmount $ \(lender, investAmount) ->
+          let lenderSteps = fmap loan.participantsWithTerms $ \(lender, investAmount) ->
                 Step with sender = lender; receiver = loan.agent; quantity = investAmount
           -- Settlement of borrower
               borrowerStep =
@@ -337,14 +341,14 @@ template SettlementProposal
 
           -- Discover settlement routes for the steps
           routedSteps <- exercise routeProviderCid RouteProvider.Discover with
-            discoverors = fromList $ loan.agent::lendersAndBorrowers
+            discoverors = Map.fromList $ loan.agent::lendersAndBorrowers
             contextId = None
             steps = borrowerStep::lenderSteps
 
           -- Instruct settlement
           (containerCid, [recInstructionCid, payInstructionCid]) <-
             exercise settlementFactoryCid Settlement.Instruct with
-              instructors = fromList $ loan.agent::lendersAndBorrowers
+              instructors = Map.fromList $ loan.agent::lendersAndBorrowers
               settlers = singleton loan.agent
               id = Id id
               description = "Settlement for " <> id
@@ -360,6 +364,7 @@ template SettlementProposal
     choice Accept_Lender : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
       controller (map fst $ Map.toList loan.participantsWithAmount)
       do
+        let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmount)
         if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmount) then do
           -- TODO: DRY
           -- Settlement of lenders
@@ -371,14 +376,14 @@ template SettlementProposal
 
           -- Discover settlement routes for the steps
           routedSteps <- exercise routeProviderCid RouteProvider.Discover with
-            discoverors = fromList $ loan.agent::lendersAndBorrowers
+            discoverors = Map.fromList $ loan.agent::lendersAndBorrowers
             contextId = None
             steps = borrowerStep::lenderSteps
 
           -- Instruct settlement
           (containerCid, [recInstructionCid, payInstructionCid]) <-
             exercise settlementFactoryCid Settlement.Instruct with
-              instructors = fromList $ loan.agent::lendersAndBorrowers
+              instructors = Map.fromList $ loan.agent::lendersAndBorrowers
               settlers = singleton loan.agent
               id = Id id
               description = "Settlement for " <> id
@@ -395,10 +400,10 @@ template SettlementProposal
 
     choice Decline : ()
       -- ^ Decline the request.
-      controller counterparty
+      controller loan.borrower -- TODO: Lenders should be allowed to decline
       do pure ()
 
     choice Withdraw : ()
       -- ^ Withdraw the request.
-      controller proposer
+      controller loan.agent
       do pure ()
