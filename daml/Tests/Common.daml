@@ -6,19 +6,26 @@ module Tests.Common where
   against a live non-stateless ledger
 -}
 
+import DA.Action
 import DA.Map (empty)
 import qualified DA.Map as Map
 import Daml.Script
 import Daml.Finance.Interface.Types.Common.Types
 import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
+import Workflow.Transfer qualified as Transfer
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
-import Daml.Finance.Holding.Fungible qualified as Fungible (Factory(..))
+import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
 import DA.Foldable
 
 import Workflow.Origination
+import Daml.Finance.Interface.Holding.Transferable (Transfer)
+import qualified Daml.Finance.Holding.Fungible as FungibleX
+import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
+import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
+import Daml.Finance.Interface.Holding.Fungible (SplitResult(SplitResult))
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -34,6 +41,80 @@ data LedgerParties = LedgerParties with
     lender_hortense : Party
     fed_ingrid : Party
   deriving (Show, Eq, Ord)
+
+
+perfTest : LedgerParties -> Script ()
+perfTest parties = do
+  let LedgerParties{..} = parties
+      instrumentId = Id "USD"
+      instrumentVersion = "0"
+      usdInstrument = InstrumentKey with
+        issuer = fed_ingrid
+        depository = fed_ingrid
+        id = instrumentId
+        version = instrumentVersion
+  accountkeys <- createAccounts parties
+  pure ()
+
+
+--createAccounts : LedgerParties -> Script [AccountKey]
+createAccounts LedgerParties{..} = do
+    let instrumentId = Id "USD"
+        instrumentVersion = "0"
+        usdInstrument = InstrumentKey with
+          issuer = fed_ingrid
+          depository = fed_ingrid
+          id = instrumentId
+          version = instrumentVersion
+
+    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed_ingrid do
+      createCmd Account.Factory with provider = fed_ingrid; observers = empty
+
+    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
+      createCmd Fungible.Factory with
+        provider = fed_ingrid
+        observers = empty
+    aliceReq <- submit borrower_alice do
+      createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed_ingrid
+    aliceAccount <- submit fed_ingrid do
+      exerciseCmd aliceReq CreateAccount.Accept with
+        label = "Alice@Fed"
+        description = "null"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid
+        observers = []
+
+    accountkeys <- forA [1..100] $ \x -> do
+      requestCid <- submit lender_hortense do
+        createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
+      c <- submit fed_ingrid $ do
+        exerciseCmd requestCid CreateAccount.Accept with
+          label = (show x)
+          description = "null"
+          accountFactoryCid
+          holdingFactoryCid
+          observers = [borrower_alice]
+      requestMon <- submit borrower_alice do
+        createCmd CreditAccount.Request with
+          account = aliceAccount
+          instrument = InstrumentKey with
+            issuer = fed_ingrid
+            depository = fed_ingrid
+            id = instrumentId
+            version = instrumentVersion
+          amount = 10000.0
+      x <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
+      pure (c, x)
+    
+    forA_ (accountkeys) $ \(a, vv) -> do
+      b <- submit lender_hortense $ do
+        createCmd Transfer.Request with 
+          receiverAccount = a
+          instrument = usdInstrument
+          currentOwner = borrower_alice
+          amount = 10000.0
+      submit borrower_alice $ exerciseCmd b Transfer.Accept with
+        holdingCid = vv
 
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
@@ -141,10 +222,11 @@ preOrigination LedgerParties{..} = do
     return $ PreOriginationStuff with
       aliceAccount
 
-origination : LedgerParties -> PreOriginationStuff -> Script (ContractId PendingLoanAgreement)
+origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgreement)
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 5.0 -- TODO: Huh
+      uuid = "golden"
       loanApplication = LoanApplication with
         borrower = borrower_alice
         agent = agent_charlie
@@ -152,23 +234,39 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
         maxInterestRate = rate
         prospectus = "To test the syndicated loans framework :)"
         durationYears = 10
+  -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplication
-  underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma loanApplication)
+  -- Agent coordinating the lending first asks an underwriter for a report
+  underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma uuid application)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
+  -- Agent with underwriter's report in hand reaches out to possible lenders
   let possibleLenders = [lender_gary, lender_hortense]
   forA_ possibleLenders $ \lender -> do
     makeFundingRequest agent_charlie amount underwritingResult lender
+  -- Lenders make their offers
+  -- TODO: Lenders declining to make an offer
   fundingInterestCids <- forA possibleLenders $ \lender -> do
     [(fundingRequestCid, fundingRequest)] <- getFundingRequestsFor lender
-    submit lender $ makeFundingInterest lender fundingRequestCid fundingRequest (amount, rate)
+    submit lender $ makeFundingInterest lender fundingRequestCid (amount, rate)
   fundingInterests <- forA fundingInterestCids $ \cid -> do
     Some fundingInterest <- queryContractId agent_charlie cid
     pure (cid, fundingInterest)
-  -- Accepting final loan
+  -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
   (rate, selectedFundingInterests) <- selectFundingInterests fundingInterests
   loanProposal <- submit agent_charlie $ createLoanProposal agent_charlie borrower_alice amount rate
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
-  createPendingLoanAgreement agent_charlie acceptedLoan selectedFundingInterests
+  -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
+  -- and gathers the signatures that have been authorized.
+  pendingAgreement <- createPendingLoanAgreement agent_charlie acceptedLoan selectedFundingInterests
+  borrowerSigned <- submit agent_charlie $ do
+    exerciseCmd acceptedLoan $ AcceptedLoan_SignAgreement with
+      agreementCid = pendingAgreement
+  lendersSigned <- foldlA
+    (\agreementCid fundingInterestCid -> submit agent_charlie $ exerciseCmd fundingInterestCid FundingInterest_SignAgreement with agreementCid)
+    borrowerSigned
+    selectedFundingInterests
+  -- Agent constructs the final, fully signed loan agreement— ready for settlement
+  submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
 
 type Amount = Numeric 2
 
@@ -200,34 +298,31 @@ makeFundingRequest agent amount underwriteCid lender = do
 getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
 getFundingRequestsFor lender = query @FundingRequest lender
 
-makeFundingInterest : Party -> ContractId FundingRequest -> FundingRequest -> (Amount, RatePerAnnum) -> Commands (ContractId FundingInterest)
-makeFundingInterest lender _ loanRequest (amount, rate) = createCmd FundingInterest with
-    agent = loanRequest.agent
-    uuid = "golden" -- TODO: Thread these through
-    participant = lender
+-- TODO: Actually make a decision about amount and rate
+makeFundingInterest : Party -> ContractId FundingRequest -> (Amount, RatePerAnnum) -> Commands (ContractId FundingInterest)
+makeFundingInterest lender requestCid (amount, rate) = exerciseCmd requestCid FundingRequest_Respond with
     amount
     rate
 
-makeUnderwritingRequest : Party -> LoanApplication -> Commands (ContractId UnderwritingRequest)
-makeUnderwritingRequest underwriter loanApplication = createCmd UnderwritingRequest with
+makeUnderwritingRequest : Party -> Text -> ContractId LoanApplication -> Commands (ContractId UnderwritingRequest)
+makeUnderwritingRequest underwriter uuid applicationCid = exerciseCmd applicationCid LoanApplication_CreateUnderwritingRequest with
   underwriter
-  uuid = "golden" -- TODO: Thread these through
-  loan = loanApplication
+  uuid
 
 -- TODO: combine the list of FundingInterest instead of just taking the first element
-selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (RatePerAnnum, [(ContractId FundingInterest, Amount)])
-selectFundingInterests ((offerCid, offer)::interests) = pure (offer.rate, [(offerCid, offer.amount)])
+selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (RatePerAnnum, [ContractId FundingInterest])
+selectFundingInterests ((offerCid, offer)::interests) = pure (offer.rate, [offerCid])
 selectFundingInterests [] = fail "No interests to fund loan"
 
-createPendingLoanAgreement : Party -> ContractId AcceptedLoan -> [(ContractId FundingInterest, Amount)] -> Script (ContractId PendingLoanAgreement)
+createPendingLoanAgreement : Party -> ContractId AcceptedLoan -> [ContractId FundingInterest] -> Script (ContractId PendingLoanAgreement)
 createPendingLoanAgreement agent acceptanceCid fundingCids = do
   Some acceptance <- queryContractId agent acceptanceCid
-  lendersWithAmounts <- forA fundingCids $ \(offerCid, amount) -> do
+  lendersWithAmounts <- forA fundingCids $ \offerCid -> do
     Some loanOffer <- queryContractId agent offerCid
-    pure (loanOffer.participant, amount)
+    pure (loanOffer.participant, loanOffer.amount)
   let agreement = LoanAgreement with
         agent
-        participantsWithAmount = Map.fromList lendersWithAmounts
+        participantsWithAmounts = Map.fromList lendersWithAmounts
         borrower = acceptance.borrower
         uuid = "golden" -- TODO: Thread these through
         prospectus = "uhhh" -- TODO: Get this
@@ -250,14 +345,9 @@ createLoanProposal agent borrower amount rate = createCmd SyndicatedLoanOffer wi
 
 acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoan)
 acceptLoanProposal borrower offerCid = do
-  Some offer <- queryContractId borrower offerCid
-  submit borrower $ createCmd AcceptedLoan with
-    agent = offer.agent
-    borrower
-    amount = offer.amount
-    rate = offer.rate
+  submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
 -- TODO: This will take a LoanAgreement once we have multi-party signing implemented
-servicing : LedgerParties -> ContractId PendingLoanAgreement -> Script ()
+servicing : LedgerParties -> ContractId LoanAgreement -> Script ()
 servicing LedgerParties{..} loan = do
   pure ()
