@@ -199,6 +199,22 @@ template AcceptedLoan
   where
     signatory borrower
     observer agent
+    choice AcceptedLoan_SignAgreement : ContractId PendingLoanAgreement
+      with
+        agreementCid : ContractId PendingLoanAgreement
+      controller agent
+      do
+        agreement <- fetch agreementCid
+        let pendingTerms = agreement.agreement.loanTerms
+        assertMsg "Amount on agreement does not match accepted terms" $
+          this.amount == pendingTerms.amount
+        assertMsg "Interest rate on agreement does not match accepted terms" $
+          this.rate == pendingTerms.rate
+        assertMsg "Borrower does not match" $
+          this.borrower == agreement.agreement.borrower
+        exercise agreementCid PendingLoanAgreement_Sign with
+          signer = this.borrower
+
 
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
 template LoanAgreement
@@ -220,7 +236,14 @@ template PendingLoanAgreement
   where
     -- TODO: ensure clause
     signatory agreement.agent, signed
-    observer Map.keys agreement.participantsWithAmount
+    observer (Map.keys agreement.participantsWithAmount), agreement.borrower
+    choice PendingLoanAgreement_Sign : ContractId PendingLoanAgreement
+      with
+        signer : Party
+      controller signer
+      do
+        create this with
+          signed = signer :: (this.signed)
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
