@@ -36,7 +36,7 @@ initialTest parties = pure ()
 
 -- Pre-origination
 preOrigination : LedgerParties -> Script ()
-preOrigination LedgerParties{..}= do
+preOrigination LedgerParties{..} = do
     -- Create the Fed
     
     -- Create USD

@@ -1,0 +1,14 @@
+{
+    "lender_hortense": "ledger-party-d628c05d-3a94-49d4-b518-52512c6e21a7::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "agent_debbie": "ledger-party-18eed26c-9357-469e-9a8c-4f2578addde8::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "fed_ingrid": "ledger-party-f7629c2c-63be-4f72-9c95-d25947f0b5f1::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "dylan_green_obsidian_systems": "ledger-party-2591fe68-266f-47de-8b4c-eb0866bfbd2c::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "lender_gary": "ledger-party-1f04a195-9411-4bed-823a-dac234565a0f::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "underwriter_fred": "ledger-party-c5bc602f-0866-4892-bde2-3ef2ede016bc::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "agent_charlie": "ledger-party-7f7b0456-d7d0-46e5-bb51-46a7aa3b8c7b::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "borrower_bob": "ledger-party-fc842bc7-265b-4c08-a846-db24860e3ae8::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "borrower_alice": "ledger-party-e2e8983c-78c5-4b81-89ec-459fdc6c6a45::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "underwriter_emma": "ledger-party-77a11130-e5fd-408b-ac5d-e03a0fe20c32::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "public": "public::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa",
+    "userAdmin": "useradmin::122032c02f796bd0dc1b38915ce60ce454e42bc0e13d3870af726476b6f50bb7ddaa"
+}
