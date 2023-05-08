@@ -1,6 +1,7 @@
 module Workflow.SettlementProposal where
 
 import DA.Functor
+import DA.List (sort)
 import qualified DA.Map as Map
 import Daml.Finance.Interface.Types.Common.Types
 
@@ -30,7 +31,7 @@ template SettlementProposal
       do
         let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
-        if sigAccumulator == lendersAndBorrowers then do
+        if (sort sigAccumulator) == (sort lendersAndBorrowers) then do
           -- TODO: DRY
           -- Settlement of lenders
           let lenderSteps = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
