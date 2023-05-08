@@ -40,6 +40,12 @@ import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..))
 import Daml.Finance.Data.Time.DateClock.Types qualified as DateClock
 import Daml.Finance.Interface.Types.Date.Classes
 
+import Workflow.Servicing (clockUpdateEvent)
+import qualified DA.Set as Set
+import qualified Daml.Finance.Interface.Lifecycle.Rule.Lifecycle as Lifecycle
+import qualified Daml.Finance.Instrument.Generic.Lifecycle.Rule as Lifecycle
+import qualified DA.Map as Map
+
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
   with
@@ -120,8 +126,6 @@ runSettlement = do
       id = instrumentId
       version = instrumentVersion
 
-  now <- getTime
-
   let businessDayConvention = Cal.Following
       periodicSchedule = createPaymentPeriodicSchedule
         (date 2023 Apr 10)
@@ -140,7 +144,7 @@ runSettlement = do
       id = instrumentId
       version = instrumentVersion
       description = "Instrument representing a bond"
-      observers = empty
+      observers = Map.fromList [("Bob", Set.singleton bob)]
       couponRate = 0.005
       periodicSchedule
       holidayCalendarIds = []
@@ -149,7 +153,27 @@ runSettlement = do
       currency = usdInstrument
       lastEventTimestamp = toUTCTime (DateClock.Unit (date 2028 Apr 10))
 
-
+  let borrower = bob
+      lender = bank
+      agent = bank
+      today = date 2023 May 10
+      parties = Set.fromList [borrower, lender, agent]
+      updateEvent = clockUpdateEvent parties parties today
+  updateEventCid <- fmap toInterfaceContractId $
+    submitMulti [agent,bob] [] $ do createCmd updateEvent
+  
+  rule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
+    submit agent $ createCmd $ Lifecycle.Rule with
+      providers = Set.singleton agent
+      observers = Map.empty
+      lifecycler = agent
+      id = Id "LifecycleRule"
+      description = "Rule to lifecycle the bond instrument"
+  (newBondOpt, effectCids) <- submitMulti [borrower,lender,agent,bob,bank] [] $
+    exerciseCmd rule Lifecycle.Evolve with
+      eventCid = updateEventCid
+      observableCids = []
+      instrument = bondInstrument
 
   -- Credit Alice's account with a token holding
   aliceRequestCid <- submit alice do
