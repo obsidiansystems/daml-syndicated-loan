@@ -1,5 +1,8 @@
 module Workflow.Origination where
 
+import DA.Map (Map)
+import qualified DA.Map as Map
+
 -- | Borrowers may create and freely submit loan applications to agents. We do
 -- not limit the ability to apply in any way.
 template LoanApplication
@@ -28,7 +31,7 @@ template UnderwritingResult
     signatory underwriter
     observer loan.agent
 
-template LoanRequest
+template FundingRequest
   with
     agent : Party
     amount : Numeric 2
@@ -37,21 +40,17 @@ template LoanRequest
     signatory agent
     observer participants
 
--- Should this template be used for both P->A and A->B?
-template LoanProposal
+template FundingInterest
   with
-    -- Seems like this needs to be tied to some overall canonical transaction, so maybe we should use the loanpplication cid everywhere to tie things together.
     participant : Party
     agent : Party
     amount : Numeric 2
-    rate : Decimal -- Decide on the right representation for interest rate
-    -- term? should the agent set it in advance? it might make it complicated if every lender is setting a different term -- yeah, should include a schedule of payments, which could be kind of complicated and should probably be be based on https://docs.daml.com/daml-finance/reference/code-documentation/daml-finance-rst/Daml-Finance-Interface-Types-Date-Schedule.html ; maybe should be set in the LoanRequest
-    -- request : ContractId LoanRequest Can't use the contract id as a key!
+    rate : Decimal
   where
     signatory participant
     observer agent
 
-template SyndicatedLoanProposal
+template LoanProposal
   with
     agent : Party
     borrower : Party
@@ -63,16 +62,26 @@ template SyndicatedLoanProposal
     signatory agent
     observer borrower
 
+template AcceptedLoan
+  with
+    agent : Party
+    borrower : Party
+    amount : Numeric 2
+    rate : Decimal
+  where
+    signatory borrower
+    observer agent
+
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
 template LoanAgreement
   with
     agent : Party
-    participants : [Party]
+    participantsWithAmount : Map Party (Numeric 2)
     borrower : Party
     amount : Numeric 2
     rate : Decimal
     -- other terms: term, fees, covenants, etc.
   where
-    signatory agent, borrower, participants
+    signatory agent, borrower, Map.keys participantsWithAmount
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
