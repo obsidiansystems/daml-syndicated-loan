@@ -280,12 +280,12 @@ template PendingLoanAgreement
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
 -- NOTE: pays to agent for now. TODO: pay to participants
-loanAgreementToBond
+loanAgreementToBondAndAmount
   :  Time -- Current time
   -> InstrumentKey -- USD
   -> LoanAgreement
-  -> Bond
-loanAgreementToBond now usd a =
+  -> (Bond, Numeric 2)
+loanAgreementToBondAndAmount now usd a = (, a.loanTerms.amount)
   Instrument with
     depository = a.agent -- same as agent for now
     issuer = a.borrower
