@@ -6,42 +6,29 @@ module Tests.Common where
   against a live non-stateless ledger
 -}
 
-import DA.Foldable
 import DA.Action
+import DA.Foldable
 import DA.Map (empty)
 import qualified DA.Map as Map
-import Daml.Script
-import Daml.Finance.Interface.Types.Common.Types
-import Workflow.CreateAccount qualified as CreateAccount
-import Workflow.CreditAccount qualified as CreditAccount
-import Workflow.Transfer qualified as Transfer
-import Daml.Finance.Interface.Account.Factory qualified as Account (F)
-import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import qualified DA.Set as S
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
-import Daml.Finance.Interface.Holding.Transferable (Transfer)
+import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import Daml.Finance.Interface.Types.Common.Types
+import Daml.Finance.Settlement.Factory (Factory(..))
+import Daml.Script
 import qualified Daml.Finance.Holding.Fungible as FungibleX
-import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
-import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
-import Daml.Finance.Interface.Holding.Fungible (SplitResult(SplitResult))
 import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
-
-import Workflow.Origination
-import Workflow.Util
-
-import DA.Foldable
-
-import Workflow.Origination
-import Workflow.SettlementProposal
-
+import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
 import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
 import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as SingleCustodian
-import qualified DA.Set as S
-
-import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
-import Daml.Finance.Settlement.Factory (Factory(..))
-
-import qualified Daml.Finance.Holding.Fungible as FungibleX
+import Workflow.CreateAccount qualified as CreateAccount
+import Workflow.CreditAccount qualified as CreditAccount
+import Workflow.Origination
+import Workflow.SettlementProposal
+import Workflow.Transfer qualified as Transfer
+import Workflow.Util
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -269,6 +256,7 @@ data Origination = Origination with
   bond : Bond
   bondRef : InstrumentKey
   bondCid : ContractId (BaseInstrument.I)
+  amount : Decimal
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
@@ -318,7 +306,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
   now <- getTime
-  let bond = loanAgreementToBond now undefined loanAgreement
+  let (bond, amount) = loanAgreementToBondAndAmount now undefined loanAgreement
   (bondRef,bondCid) <- createBond bond
   return Origination with
     loanAgreement
@@ -326,6 +314,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     bond
     bondRef
     bondCid
+    amount
 
 type Amount = Decimal
 
