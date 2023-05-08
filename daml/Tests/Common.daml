@@ -166,7 +166,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- TODO: Lenders declining to make an offer
   fundingInterestCids <- forA possibleLenders $ \lender -> do
     [(fundingRequestCid, fundingRequest)] <- getFundingRequestsFor lender
-    submit lender $ makeFundingInterest lender fundingRequestCid fundingRequest (amount, rate)
+    submit lender $ makeFundingInterest lender fundingRequestCid (amount, rate)
   fundingInterests <- forA fundingInterestCids $ \cid -> do
     Some fundingInterest <- queryContractId agent_charlie cid
     pure (cid, fundingInterest)
@@ -217,11 +217,9 @@ makeFundingRequest agent amount underwriteCid lender = do
 getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
 getFundingRequestsFor lender = query @FundingRequest lender
 
-makeFundingInterest : Party -> ContractId FundingRequest -> FundingRequest -> (Amount, RatePerAnnum) -> Commands (ContractId FundingInterest)
-makeFundingInterest lender _ loanRequest (amount, rate) = createCmd FundingInterest with
-    agent = loanRequest.agent
-    uuid = "golden" -- TODO: Thread these through
-    participant = lender
+-- TODO: Actually make a decision about amount and rate
+makeFundingInterest : Party -> ContractId FundingRequest -> (Amount, RatePerAnnum) -> Commands (ContractId FundingInterest)
+makeFundingInterest lender requestCid (amount, rate) = exerciseCmd requestCid FundingRequest_Respond with
     amount
     rate
 
