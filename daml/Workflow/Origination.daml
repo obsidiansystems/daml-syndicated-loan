@@ -299,7 +299,7 @@ loanAgreementToBond now usd a =
     dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
     currency = usd
     observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithAmounts))
-    lastEventTimestamp = error "TODO"
+    lastEventTimestamp = now
   where
     startDate = toDateUTC now
 

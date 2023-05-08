@@ -6,6 +6,7 @@ module Tests.Common where
   against a live non-stateless ledger
 -}
 
+import DA.Foldable
 import DA.Action
 import DA.Map (empty)
 import qualified DA.Map as Map
@@ -18,14 +19,16 @@ import Daml.Finance.Interface.Account.Factory qualified as Account (F)
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
-import DA.Foldable
-
-import Workflow.Origination
 import Daml.Finance.Interface.Holding.Transferable (Transfer)
 import qualified Daml.Finance.Holding.Fungible as FungibleX
 import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
 import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
 import Daml.Finance.Interface.Holding.Fungible (SplitResult(SplitResult))
+import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
+
+import Workflow.Origination
+import Workflow.Util
+
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -119,8 +122,8 @@ createAccounts LedgerParties{..} = do
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
   stuff <- preOrigination parties
-  loan <- origination parties stuff
-  servicing parties loan
+  originationData <- origination parties stuff
+  servicing parties originationData
 
 data PreOriginationStuff = PreOriginationStuff with
   aliceAccount : AccountKey
@@ -222,7 +225,14 @@ preOrigination LedgerParties{..} = do
     return $ PreOriginationStuff with
       aliceAccount
 
-origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgreement)
+data Origination = Origination with
+  loanAgreement : LoanAgreement
+  loanAgreementCid : ContractId LoanAgreement
+  bond : Bond
+  bondRef : InstrumentKey
+  bondCid : ContractId (BaseInstrument.I)
+
+origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 5.0 -- TODO: Huh
@@ -266,7 +276,17 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     borrowerSigned
     selectedFundingInterests
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
-  submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+  loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+  Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
+  now <- getTime
+  let bond = loanAgreementToBond now undefined loanAgreement
+  (bondRef,bondCid) <- createBond bond
+  return Origination with
+    loanAgreement
+    loanAgreementCid
+    bond
+    bondRef
+    bondCid
 
 type Amount = Numeric 2
 
@@ -348,6 +368,7 @@ acceptLoanProposal borrower offerCid = do
   submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
 -- TODO: This will take a LoanAgreement once we have multi-party signing implemented
-servicing : LedgerParties -> ContractId LoanAgreement -> Script ()
-servicing LedgerParties{..} loan = do
+servicing : LedgerParties -> Origination -> Script ()
+servicing LedgerParties{..} origination = do
+  
   pure ()
