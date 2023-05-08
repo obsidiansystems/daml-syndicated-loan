@@ -11,6 +11,9 @@ import qualified DA.Set as Set
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(NoRollConvention), Period(..))
 import DA.Date (addDays, toDateUTC)
+import DA.Set (Set)
+import DA.Assert
+
 type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 
 -- ### TODO
@@ -23,7 +26,7 @@ type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 -- | Rate per annum.
 -- E.g. "3.5% per annum" is represented as 0.035
 newtype RatePerAnnum = RatePerAnnum { unRatePerAnnum : Decimal }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 -- | An application for a loan by a borrower
 -- NOTE: Borrowers may create and freely submit loan applications to agents. We do
@@ -42,6 +45,18 @@ template LoanApplication
     signatory borrower
     observer agent
 
+    choice CreateUnderwritingRequest : ContractId UnderwritingRequest
+      with
+        underwriter : Party
+        uuid : Text
+      controller agent
+
+      do
+        create UnderwritingRequest with
+          underwriter
+          uuid
+          loan = error "TODO"
+
 template UnderwritingRequest
   with
     underwriter : Party
@@ -53,6 +68,17 @@ template UnderwritingRequest
     key (loan.agent, uuid) : (Party, Text)
     maintainer key._1
 
+    choice CreateUnderwritingResult : ContractId UnderwritingResult
+      with
+        result : Bool
+      controller underwriter
+      do
+        create UnderwritingResult with
+          underwriter
+          agent = loan.agent
+          uuid
+          result
+
 template UnderwritingResult
   with
     underwriter : Party
@@ -60,15 +86,14 @@ template UnderwritingResult
     uuid : Text
     result : Bool
   where
-    signatory underwriter
-    observer agent
+    signatory agent, underwriter
     key (underwriter, agent, uuid) : (Party, Party, Text)
     maintainer key._1
 
     nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
       with
         disclose_to : Party
-      controller agent 
+      controller agent
       do
         create UnderwritingDisclosure with
           underwriting = this
@@ -82,8 +107,21 @@ template UnderwritingDisclosure
     signatory underwriting.underwriter, underwriting.agent
     observer participant
 
+    nonconsuming choice CreateLoanRequest : ContractId FundingRequest
+      with
+        participant : Party
+      controller underwriting.agent
+      do
+        (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (underwriting.agent, underwriting.uuid)
+        create FundingRequest with
+          agent = underwriting.agent
+          uuid = underwriting.uuid
+          totalApplicationAmount = underwritingRequest.loan.amount
+          participant
+          underwrite = self
+
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
-template LoanRequest
+template FundingRequest
   with
     agent : Party
     uuid : Text
@@ -91,15 +129,30 @@ template LoanRequest
     totalApplicationAmount : Numeric 2
     -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
     participant : Party
-    -- ^ The agent creates one 'LoanRequest' for each participant from whom it wants an offer
+    -- ^ The agent creates one 'FundingRequest' for each participant from whom it wants an offer
   where
     signatory agent
     observer participant
     key (agent, participant, uuid) : (Party, Party, Text)
     maintainer key._1
 
+    choice CreateLoanOffer : ContractId FundingInterest
+      with
+        amount : Numeric 2
+        rate : RatePerAnnum
+      controller participant
+      do
+        (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (agent, uuid)
+        assert $ rate <= underwritingRequest.loan.maxInterestRate
+        create FundingInterest with
+          agent
+          uuid
+          participant
+          amount
+          rate
+
 -- | An offer by a participant to loan part (or all of) of the amount specified by the LoanApplication
-template LoanOffer
+template FundingInterest
   with
     agent : Party
     uuid : Text
@@ -158,6 +211,7 @@ template LoanAgreement
     loanTerms : LoanTerms
   where
     signatory agent, borrower, Map.keys participantsWithAmount
+    ensure sum (Map.values participantsWithAmount) == loanTerms.amount
 
 template PendingLoanAgreement
   with
