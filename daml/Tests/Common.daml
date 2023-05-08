@@ -247,7 +247,7 @@ preOrigination LedgerParties{..} = do
     debbieRequestCid <- submit agent_debbie do
       createCmd CreateAccount.Request with owner = agent_debbie; custodian = fed_ingrid
     debbieAccount <- submit fed_ingrid do
-      exerciseCmd charlieRequestCid CreateAccount.Accept with
+      exerciseCmd debbieRequestCid CreateAccount.Accept with
         label = "Debbie@Bank"
         description = "Account of Debbie at Bank"
         accountFactoryCid = accountFactoryCid
@@ -262,11 +262,12 @@ preOrigination LedgerParties{..} = do
 origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgreement)
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
-      rate = RatePerAnnum 5.0 -- TODO: Huh
+      rate = RatePerAnnum 0.05 -- 5% per annum
       uuid = "golden"
       loanApplication = LoanApplication with
         borrower = borrower_alice
         agent = agent_charlie
+        instrument = usdInstrument
         amount
         maxInterestRate = rate
         prospectus = "To test the syndicated loans framework :)"
@@ -290,7 +291,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     pure (cid, fundingInterest)
   -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
   (rate, selectedFundingInterests) <- selectFundingInterests fundingInterests
-  loanProposal <- submit agent_charlie $ createLoanProposal agent_charlie borrower_alice amount rate
+  loanProposal <- submit agent_charlie $ createLoanProposal application uuid rate
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
@@ -364,6 +365,7 @@ createPendingLoanAgreement agent acceptanceCid fundingCids = do
         uuid = "golden" -- TODO: Thread these through
         prospectus = "uhhh" -- TODO: Get this
         loanTerms = LoanTerms with
+          instrument = acceptance.instrument
           amount = acceptance.amount
           rate = acceptance.rate
           durationYears = 10 -- TODO: Get this
@@ -372,12 +374,9 @@ createPendingLoanAgreement agent acceptanceCid fundingCids = do
     agreement
     signed = []
 
-createLoanProposal : Party -> Party -> Amount -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
-createLoanProposal agent borrower amount rate = createCmd SyndicatedLoanOffer with
-  agent
-  borrower
-  uuid = "golden" -- TODO: Thread these through
-  amount
+createLoanProposal : ContractId LoanApplication -> Text -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
+createLoanProposal applicationCid uuid rate = exerciseCmd applicationCid LoanApplication_CreateOffer with
+  uuid
   rate
 
 acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoan)
@@ -421,7 +420,6 @@ settleLoan LedgerParties {..} loanAgreement = do
     exerciseCmd settlementProposalCid Accept_Borrower
 
   return ()
-
 
 template SettlementProposal
   with

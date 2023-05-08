@@ -35,6 +35,7 @@ template LoanApplication
   with
     borrower : Party
     agent : Party
+    instrument : InstrumentKey
     amount : Numeric 2
     durationYears : Int  -- ^ Number of years
     maxInterestRate : RatePerAnnum
@@ -57,6 +58,19 @@ template LoanApplication
           uuid
           loan = this
 
+    choice LoanApplication_CreateOffer : ContractId SyndicatedLoanOffer
+      with
+        rate : RatePerAnnum
+        uuid : Text
+      controller agent
+      do
+        create SyndicatedLoanOffer with
+          borrower
+          agent
+          uuid
+          instrument
+          amount
+          rate
 template UnderwritingRequest
   with
     underwriter : Party
@@ -76,6 +90,7 @@ template UnderwritingRequest
         create UnderwritingResult with
           underwriter
           agent = loan.agent
+          instrument = loan.instrument
           amount = loan.amount
           maxInterestRate = loan.maxInterestRate
           uuid
@@ -86,6 +101,7 @@ template UnderwritingResult
     underwriter : Party
     uuid : Text
     agent : Party
+    instrument : InstrumentKey
     amount : Numeric 2
     maxInterestRate : RatePerAnnum
     result : Bool
@@ -152,6 +168,7 @@ template FundingRequest
           agent
           uuid
           participant
+          instrument = disclosed.underwriting.instrument
           amount
           rate
 
@@ -161,6 +178,7 @@ template FundingInterest
     agent : Party
     uuid : Text
     participant : Party
+    instrument : InstrumentKey
     amount : Numeric 2
     rate : RatePerAnnum
     -- TODO: for now we just reject offers that are greater than LoanApplication.maxInterestRate, but eventually we'd like to accept all offers that makes it possible for the agent to offer a final loan of less than or equal to LoanApplication.maxInterestRate.
@@ -191,6 +209,7 @@ template SyndicatedLoanOffer
     agent : Party
     uuid : Text
     borrower : Party
+    instrument : InstrumentKey
     amount : Numeric 2
     rate : RatePerAnnum
     -- other terms: term, fees, covenants, etc.
@@ -206,11 +225,13 @@ template SyndicatedLoanOffer
         create AcceptedLoan with
           agent
           borrower
+          instrument
           amount
           rate
 
 
 data LoanTerms = LoanTerms with
+    instrument : InstrumentKey
     amount : Numeric 2 -- Principal. TODO: for now always equal to LoanApplication.amount
     rate : RatePerAnnum
     -- ^ The interest amount paid by the borrower yearly is (amount * rate).
@@ -222,6 +243,7 @@ data LoanTerms = LoanTerms with
 template AcceptedLoan
   with
     agent : Party
+    instrument : InstrumentKey
     borrower : Party
     amount : Numeric 2
     rate : RatePerAnnum
