@@ -5,6 +5,7 @@ import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFreque
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
 import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
 import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(Act360))
+import DA.Map (Map)
 import qualified DA.Map as Map
 import qualified DA.Set as Set
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..))
@@ -84,30 +85,46 @@ template UnderwritingResult
     uuid : Text
     result : Bool
   where
-    signatory underwriter
-    observer agent -- TODO: participants must be able to view
-    key (agent, uuid) : (Party, Text)
+    signatory agent, underwriter
+    key (underwriter, agent, uuid) : (Party, Party, Text)
     maintainer key._1
 
-    choice CreateLoanRequest : ContractId LoanRequest
+    nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
       with
-        participant : Party
+        disclose_to : Party
       controller agent
       do
-        (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (agent, uuid)
+        create UnderwritingDisclosure with
+          underwriting = this
+          participant = disclose_to
+
+template UnderwritingDisclosure
+  with
+    underwriting : UnderwritingResult
+    participant : Party
+  where
+    signatory underwriting.underwriter, underwriting.agent
+    observer participant
+
+    nonconsuming choice CreateLoanRequest : ContractId LoanRequest
+      with
+        participant : Party
+      controller underwriting.agent
+      do
+        (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (underwriting.agent, underwriting.uuid)
         create LoanRequest with
-          agent
-          uuid
+          agent = underwriting.agent
+          uuid = underwriting.uuid
           totalApplicationAmount = underwritingRequest.loan.amount
           participant
-          underwritingResult = result
+          underwrite = self
 
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
 template LoanRequest
   with
     agent : Party
     uuid : Text
-    underwritingResult : Bool
+    underwrite : ContractId UnderwritingDisclosure
     totalApplicationAmount : Numeric 2
     -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
     participant : Party
@@ -115,7 +132,7 @@ template LoanRequest
   where
     signatory agent
     observer participant
-    key (agent, uuid) : (Party, Text)
+    key (agent, participant, uuid) : (Party, Party, Text)
     maintainer key._1
 
     choice CreateLoanOffer : ContractId LoanOffer
@@ -143,7 +160,7 @@ template LoanOffer
   where
     signatory participant
     observer agent
-    key (agent, uuid) : (Party, Text)
+    key (participant, agent, uuid) : (Party, Party, Text)
     maintainer key._1
 
 template SyndicatedLoanOfferCollector
@@ -168,24 +185,24 @@ template SyndicatedLoanOfferCollector
         loanOffer.agent === agent
         loanOffer.uuid === uuid
         let actualLoanAmount = min loanOffer.amount (targetAmount - satisfiedAmount)
-        pure SyndicatedLoanOfferCollector with
+        create SyndicatedLoanOfferCollector with
           agent
           uuid
           targetAmount
           satisfiedAmount = satisfiedAmount + actualLoanAmount
           loanOffers = loanOffer{amount = actualLoanAmount} :: loanOffers -- TODO: how to make the modified LoanOffer visible to participant
 
-    choice CreateSyndicatedLoanOffer : ContractId SyndicatedLoanOffer
-      controller agent
-      do
-        satisfiedAmount === targetAmount
-        (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (agent, uuid)
-        create SyndicatedLoanOffer with
-          agent
-          uuid
-          borrower = underwritingRequest.loan.borrower
-          amount = targetAmount
-          rate = underwritingRequest.loan.maxInterestRate
+    -- choice CreateSyndicatedLoanOffer : ContractId SyndicatedLoanOffer
+    --   controller agent
+    --   do
+    --     satisfiedAmount === targetAmount
+    --     (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (agent, uuid)
+    --     create SyndicatedLoanOffer with
+    --       agent
+    --       uuid
+    --       borrower = underwritingRequest.loan.borrower
+    --       amount = targetAmount
+    --       rate = underwritingRequest.loan.maxInterestRate
 
 template SyndicatedLoanOffer
   with
@@ -211,17 +228,36 @@ data LoanTerms = LoanTerms with
     -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
       deriving (Eq, Show)
 
+template AcceptedLoan
+  with
+    agent : Party
+    borrower : Party
+    amount : Numeric 2
+    rate : RatePerAnnum
+  where
+    signatory borrower
+    observer agent
+
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
 template LoanAgreement
   with
     agent : Party
-    participants : [Party]
+    participantsWithAmount : Map Party (Numeric 2)
     borrower : Party
     uuid : Text -- Points to UnderwritingRequest.uuid
     prospectus : Text
     loanTerms : LoanTerms
   where
-    signatory agent, borrower, participants
+    signatory agent, borrower, Map.keys participantsWithAmount
+
+template PendingLoanAgreement
+  with
+    agreement : LoanAgreement
+    signed : [Party]
+  where
+    -- TODO: ensure clause
+    signatory agreement.agent, signed
+    observer Map.keys agreement.participantsWithAmount
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
@@ -244,8 +280,8 @@ loanAgreementToBond now usd a =
     calendarDataProvider = a.agent -- NOT USED!
     dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
     currency = usd
-    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton a.participants)
-    lastEventTimestamp = now
+    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithAmount))
+    lastEventTimestamp = error "TODO"
   where
     startDate = toDateUTC now
 
