@@ -7,6 +7,7 @@ module Tests.Common where
 -}
 
 import DA.Action
+import DA.List
 import DA.Map (empty)
 import qualified DA.Map as Map
 import Daml.Script
@@ -25,7 +26,8 @@ import Daml.Finance.Interface.Holding.Transferable (Transfer)
 import qualified Daml.Finance.Holding.Fungible as FungibleX
 import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
 import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
-import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(SplitResult))
+import Daml.Finance.Interface.Holding.Fungible (Fungible, Fungible, SplitResult(SplitResult))
+import qualified Daml.Finance.Interface.Holding.Base as B
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -57,7 +59,7 @@ perfTest parties = do
   pure ()
 
 
---createAccounts : LedgerParties -> Script [AccountKey]
+createAccounts : LedgerParties -> Script ()
 createAccounts LedgerParties{..} = do
     let instrumentId = Id "USD"
         instrumentVersion = "0"
@@ -92,13 +94,13 @@ createAccounts LedgerParties{..} = do
             depository = fed_ingrid
             id = instrumentId
             version = instrumentVersion
-          amount = 10000.0
-    x <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
-    xx <- submit borrower_alice do 
-      exerciseCmd (coerceInterfaceContractId @Fungible x) Fungible.Split with
-        amounts = [ 5.0 ]
-
-    accountkeys <- forA [1..5] $ \x -> do
+          amount = 100000.0
+    xv <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
+    SplitResult{..} <- submit borrower_alice do 
+      exerciseCmd (coerceInterfaceContractId @Fungible xv) Fungible.Split with
+        amounts = replicate 100 5.0
+    
+    accountkeys <- forA [1..100] $ \x -> do
       requestCid <- submit lender_hortense do
         createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
       c <- submit fed_ingrid $ do
@@ -108,19 +110,19 @@ createAccounts LedgerParties{..} = do
           accountFactoryCid
           holdingFactoryCid
           observers = [borrower_alice]
-      pure (c, x)
+      pure (c)
     pure ()
-    {-
-    forA_ (accountkeys) $ \(a, vv) -> do
-      b <- submit lender_hortense $ do
+
+    let xd = zip accountkeys splitCids
+    forA_ xd $ \(a, b) -> do
+      x <- submit lender_hortense $ do
         createCmd Transfer.Request with 
           receiverAccount = a
           instrument = usdInstrument
           currentOwner = borrower_alice
-          amount = 10000.0
-      submit borrower_alice $ exerciseCmd b Transfer.Accept with
-        holdingCid = vv
-    -}
+          amount = 5.0
+      submit borrower_alice $ exerciseCmd x Transfer.Accept with
+        holdingCid = (coerceInterfaceContractId @B.Base b)
 
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
