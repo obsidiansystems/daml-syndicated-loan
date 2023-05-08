@@ -163,47 +163,6 @@ template FundingInterest
     key (participant, agent, uuid) : (Party, Party, Text)
     maintainer key._1
 
-template SyndicatedLoanOfferCollector
-  with
-    agent : Party
-    uuid : Text
-    targetAmount : Numeric 2
-    satisfiedAmount : Numeric 2
-    loanOffers : [FundingInterest]
-  where
-    signatory agent
-    key (agent, uuid) : (Party, Text)
-    maintainer key._1
-
-    choice AcceptLoanOffer : ContractId SyndicatedLoanOfferCollector
-      with
-        loanOffer : FundingInterest
-      controller agent
-      do
-        assertMsg ("loan targetAmount " <> show targetAmount <> " already satisfied: " <> show satisfiedAmount) $
-          satisfiedAmount < targetAmount
-        loanOffer.agent === agent
-        loanOffer.uuid === uuid
-        let actualLoanAmount = min loanOffer.amount (targetAmount - satisfiedAmount)
-        create SyndicatedLoanOfferCollector with
-          agent
-          uuid
-          targetAmount
-          satisfiedAmount = satisfiedAmount + actualLoanAmount
-          loanOffers = loanOffer{amount = actualLoanAmount} :: loanOffers -- TODO: how to make the modified FundingInterest visible to participant
-
-    -- choice CreateSyndicatedLoanOffer : ContractId SyndicatedLoanOffer
-    --   controller agent
-    --   do
-    --     satisfiedAmount === targetAmount
-    --     (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (agent, uuid)
-    --     create SyndicatedLoanOffer with
-    --       agent
-    --       uuid
-    --       borrower = underwritingRequest.loan.borrower
-    --       amount = targetAmount
-    --       rate = underwritingRequest.loan.maxInterestRate
-
 template SyndicatedLoanOffer
   with
     agent : Party
