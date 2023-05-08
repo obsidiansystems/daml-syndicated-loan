@@ -1,4 +1,4 @@
-module IDE where
+module Tests.IDE where
 
 import Tests.Common
 import Daml.Script
