@@ -106,13 +106,13 @@ template UnderwritingDisclosure
     signatory underwriting.underwriter, underwriting.agent
     observer participant
 
-    nonconsuming choice CreateLoanRequest : ContractId LoanRequest
+    nonconsuming choice CreateLoanRequest : ContractId FundingRequest
       with
         participant : Party
       controller underwriting.agent
       do
         (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (underwriting.agent, underwriting.uuid)
-        create LoanRequest with
+        create FundingRequest with
           agent = underwriting.agent
           uuid = underwriting.uuid
           totalApplicationAmount = underwritingRequest.loan.amount
@@ -120,7 +120,7 @@ template UnderwritingDisclosure
           underwrite = self
 
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
-template LoanRequest
+template FundingRequest
   with
     agent : Party
     uuid : Text
@@ -128,7 +128,7 @@ template LoanRequest
     totalApplicationAmount : Numeric 2
     -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
     participant : Party
-    -- ^ The agent creates one 'LoanRequest' for each participant from whom it wants an offer
+    -- ^ The agent creates one 'FundingRequest' for each participant from whom it wants an offer
   where
     signatory agent
     observer participant

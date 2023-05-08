@@ -185,22 +185,22 @@ makeFundingRequest
     -> Numeric 2
     -> ContractId UnderwritingResult
     -> Party
-    -> Script (ContractId LoanRequest)
+    -> Script (ContractId FundingRequest)
 makeFundingRequest agent amount underwriteCid lender = do
     Some underwrite <- queryContractId agent underwriteCid
     disclosedUnderwriting <- submit agent $ exerciseCmd underwriteCid UnderwritingResult_Disclose with
         disclose_to = lender
-    submit agent $ createCmd LoanRequest with
+    submit agent $ createCmd FundingRequest with
         agent
         uuid = "golden" -- TODO: Thread these through
         underwrite = disclosedUnderwriting
         participant = lender
         totalApplicationAmount = amount
 
-getFundingRequestsFor : Party -> Script [(ContractId LoanRequest, LoanRequest)]
-getFundingRequestsFor lender = query @LoanRequest lender
+getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
+getFundingRequestsFor lender = query @FundingRequest lender
 
-makeFundingInterest : Party -> ContractId LoanRequest -> LoanRequest -> (Amount, RatePerAnnum) -> Commands (ContractId LoanOffer)
+makeFundingInterest : Party -> ContractId FundingRequest -> FundingRequest -> (Amount, RatePerAnnum) -> Commands (ContractId LoanOffer)
 makeFundingInterest lender _ loanRequest (amount, rate) = createCmd LoanOffer with
     agent = loanRequest.agent
     uuid = "golden" -- TODO: Thread these through
