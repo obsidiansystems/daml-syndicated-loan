@@ -239,10 +239,10 @@ createPendingLoanAgreement agent acceptanceCid fundingCids = do
   Some acceptance <- queryContractId agent acceptanceCid
   lendersWithAmounts <- forA fundingCids $ \offerCid -> do
     Some loanOffer <- queryContractId agent offerCid
-    pure (loanOffer.participant, (loanOffer.amount, loanOffer.rate))
+    pure (loanOffer.participant, loanOffer.amount)
   let agreement = LoanAgreement with
         agent
-        participantsWithTerms = Map.fromList lendersWithAmounts
+        participantsWithAmounts = Map.fromList lendersWithAmounts
         borrower = acceptance.borrower
         uuid = "golden" -- TODO: Thread these through
         prospectus = "uhhh" -- TODO: Get this
