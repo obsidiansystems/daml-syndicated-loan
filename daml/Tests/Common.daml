@@ -3,9 +3,15 @@ module Common where
 import Daml.Script
 
 data LedgerParties = LedgerParties with
-  alice : Party
-  bob : Party
-
+  borrower_alice : Party
+  borrower_bob : Party
+  agent_charlie : Party
+  agent_debbie : Party
+  underwriter_emma : Party
+  underwriter_fred : Party
+  lender_gary : Party
+  lender_hortense : Party
+  fed_ingrid : Party
 
 initialTest : LedgerParties -> Script ()
 initialTest parties = pure ()

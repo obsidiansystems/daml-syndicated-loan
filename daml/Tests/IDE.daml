@@ -5,9 +5,16 @@ import Daml.Script
 
 createParties : Script LedgerParties
 createParties = do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
-  pure $ LedgerParties { alice, bob }
+  borrower_alice <- allocateParty "Borrower_Alice"
+  borrower_bob <- allocateParty "Borrower_Bob"
+  agent_charlie <- allocateParty "Agent_Charlie"
+  agent_debbie <- allocateParty "Agent_Debbie"
+  underwriter_emma <- allocateParty "Underwriter_Emma"
+  underwriter_fred <- allocateParty "Underwriter_Fred"
+  lender_gary <- allocateParty "Lender_Gary"
+  lender_hortense <- allocateParty "Lender_Hortense"
+  fed_ingrid <- allocateParty "Fed_Ingrid"
+  pure $ LedgerParties { .. }
 
 initialTestLocal : Script ()
 initialTestLocal = do
