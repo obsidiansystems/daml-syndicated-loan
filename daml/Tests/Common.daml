@@ -15,6 +15,7 @@ import Daml.Finance.Interface.Account.Factory qualified as Account (F)
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible (Factory(..))
+import DA.Foldable
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -32,13 +33,19 @@ data LedgerParties = LedgerParties with
   deriving (Show, Eq, Ord)
 
 initialTest : LedgerParties -> Script ()
-initialTest parties = pure ()
+initialTest parties = do
+  stuff <- preOrigination parties
+  loan <- origination parties stuff
+  servicing parties loan
+
+data PreOriginationStuff = PreOriginationStuff with
+  aliceAccount : AccountKey
 
 -- Pre-origination
-preOrigination : LedgerParties -> Script ()
+preOrigination : LedgerParties -> Script PreOriginationStuff
 preOrigination LedgerParties{..} = do
     -- Create the Fed
-    
+
     -- Create USD
     let instrumentId = Id "USD"
         instrumentVersion = "0"
@@ -101,4 +108,78 @@ preOrigination LedgerParties{..} = do
         holdingFactoryCid = holdingFactoryCid
         observers = []
 
-    return ()
+    return $ PreOriginationStuff with
+      aliceAccount
+
+template Loan
+  with
+    borrower : Party
+    agent : Party
+    lenders : [Party]
+  where
+    signatory borrower, agent, lenders
+
+origination : LedgerParties -> PreOriginationStuff -> Script (ContractId Loan)
+origination LedgerParties{..} PreOriginationStuff{..} = do
+  let amount = 10_000_000.00
+  application <- submit borrower_alice $ makeLoanApplication amount
+  underwritingRequest <- submit agent_charlie makeUnderwritingRequest
+  underwritingResult <- submit underwriter_emma $ makeUnderwritingResult underwritingRequest
+  let possibleLenders = [lender_gary, lender_hortense]
+  forA_ possibleLenders $ \lender -> do
+    submit agent_charlie $ makeFundingRequest underwritingResult lender
+  fundingInterestCids <- forA possibleLenders $ \lender -> do
+    [(fundingRequestCid, fundingRequest)] <- getFundingRequestsFor lender
+    submit lender $ makeFundingInterest fundingRequestCid fundingRequest [(10_000_000.00, 5.0)]
+  fundingInterests <- forA fundingInterestCids $ \cid -> do
+    Some fundingInterest <- queryContractId agent_charlie cid
+    pure (cid, fundingInterest)
+  (rate, selectedFundingInterests) <- selectFundingInterests fundingInterests
+  loanProposal <- submit agent_charlie $ createLoanProposal borrower_alice amount rate
+  acceptedLoan <- submit borrower_alice $ acceptLoanProposal loanProposal
+  submit agent_charlie $ createFinalLoan acceptedLoan selectedFundingInterests
+
+data LoanApplication
+data UnderwritingRequest
+data UnderwritingResult
+data AcceptedLoan
+data FundingInterest
+data LoanProposal
+data FundingRequest
+
+type Amount = Numeric 2
+type Rate = Decimal
+
+makeUnderwritingResult : ContractId UnderwritingRequest -> Commands (ContractId UnderwritingResult)
+makeUnderwritingResult = undefined
+
+makeFundingRequest : ContractId UnderwritingResult -> Party -> Commands (ContractId FundingRequest)
+makeFundingRequest = undefined
+
+getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
+getFundingRequestsFor = undefined
+
+makeLoanApplication : Amount -> Commands (ContractId LoanApplication)
+makeLoanApplication = undefined
+
+makeUnderwritingRequest : Commands (ContractId UnderwritingRequest)
+makeUnderwritingRequest = undefined
+
+selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (Rate, [(ContractId FundingInterest, Amount)])
+selectFundingInterests = undefined
+
+createFinalLoan : ContractId AcceptedLoan -> [(ContractId FundingInterest, Amount)] -> Commands (ContractId Loan)
+createFinalLoan = undefined
+
+createLoanProposal : Party -> Amount -> Rate -> Commands (ContractId LoanProposal)
+createLoanProposal = undefined
+
+acceptLoanProposal : ContractId LoanProposal -> Commands (ContractId AcceptedLoan)
+acceptLoanProposal = undefined
+
+makeFundingInterest : ContractId FundingRequest -> FundingRequest -> [(Amount, Rate)] -> Commands (ContractId FundingInterest)
+makeFundingInterest = undefined
+
+servicing : LedgerParties -> ContractId Loan -> Script ()
+servicing LedgerParties{..} loan = do
+  pure ()
