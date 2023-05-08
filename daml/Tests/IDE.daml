@@ -21,3 +21,4 @@ initialTestLocal : Script ()
 initialTestLocal = do
   parties <- createParties
   initialTest parties
+  preOrigination parties

@@ -1,4 +1,4 @@
-module Common where
+module Tests.Common where
 
 {-
   ALL Functions in the file should have a type signature of LedgerParties -> Script a, this is because

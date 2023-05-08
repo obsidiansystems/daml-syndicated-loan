@@ -1,6 +1,6 @@
-module DamlHub where
+module Tests.DamlHub where
 
-import Common
+import Tests.Common
 import Daml.Script
 
 initialTestHub : LedgerParties -> Script ()
