@@ -474,7 +474,7 @@ template SettlementProposal
         currLender : Party
       controller (map fst $ Map.toList loan.participantsWithAmount)
       do
-        let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmount)
+        let lendersAndBorrowers : [Party] = loan.borrower::(map fst $ Map.toList loan.participantsWithAmount)
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmount) then do
           -- TODO: DRY
@@ -487,14 +487,14 @@ template SettlementProposal
 
           -- Discover settlement routes for the steps
           routedSteps <- exercise routeProviderCid RouteProvider.Discover with
-            discoverors = Map.fromList $ loan.agent::lendersAndBorrowers
+            discoverors = S.fromList $ loan.agent::lendersAndBorrowers
             contextId = None
             steps = borrowerStep::lenderSteps
 
           -- Instruct settlement
           (containerCid, [recInstructionCid, payInstructionCid]) <-
             exercise settlementFactoryCid Settlement.Instruct with
-              instructors = Map.fromList $ loan.agent::lendersAndBorrowers
+              instructors = S.fromList $ loan.agent::lendersAndBorrowers
               settlers = singleton loan.agent
               id = Id id
               description = "Settlement for " <> id
