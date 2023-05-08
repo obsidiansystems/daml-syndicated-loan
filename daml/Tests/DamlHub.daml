@@ -13,3 +13,4 @@ initialTestHub parties = initialTest parties
 runAllTests : LedgerParties -> Script ()
 runAllTests LedgerParties{..} = do
     pure ()
+    

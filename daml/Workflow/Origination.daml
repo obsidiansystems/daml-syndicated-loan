@@ -5,11 +5,15 @@ import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFreque
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
 import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
 import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(Act360))
+import DA.Map (Map)
 import qualified DA.Map as Map
 import qualified DA.Set as Set
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(NoRollConvention), Period(..))
 import DA.Date (addDays, toDateUTC)
+import DA.Set (Set)
+import DA.Assert
+
 type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 
 -- ### TODO
@@ -22,7 +26,7 @@ type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 -- | Rate per annum.
 -- E.g. "3.5% per annum" is represented as 0.035
 newtype RatePerAnnum = RatePerAnnum { unRatePerAnnum : Decimal }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 -- | An application for a loan by a borrower
 -- NOTE: Borrowers may create and freely submit loan applications to agents. We do
@@ -41,6 +45,18 @@ template LoanApplication
     signatory borrower
     observer agent
 
+    choice CreateUnderwritingRequest : ContractId UnderwritingRequest
+      with
+        underwriter : Party
+        uuid : Text
+      controller agent
+
+      do
+        create UnderwritingRequest with
+          underwriter
+          uuid
+          loan = error "TODO"
+
 template UnderwritingRequest
   with
     underwriter : Party
@@ -52,35 +68,90 @@ template UnderwritingRequest
     key (loan.agent, uuid) : (Party, Text)
     maintainer key._1
 
+    choice CreateUnderwritingResult : ContractId UnderwritingResult
+      with
+        result : Bool
+      controller underwriter
+      do
+        create UnderwritingResult with
+          underwriter
+          loan
+          uuid
+          result
+
 template UnderwritingResult
   with
     underwriter : Party
-    agent : Party
     uuid : Text
+    loan : LoanApplication
     result : Bool
   where
-    signatory underwriter
-    observer agent
-    key (agent, uuid) : (Party, Text)
+    signatory loan.agent, underwriter
+    key (underwriter, loan.agent, uuid) : (Party, Party, Text)
     maintainer key._1
 
+    nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
+      with
+        disclose_to : Party
+      controller loan.agent
+      do
+        create UnderwritingDisclosure with
+          underwriting = this
+          participant = disclose_to
+
+template UnderwritingDisclosure
+  with
+    underwriting : UnderwritingResult
+    participant : Party
+  where
+    signatory underwriting.underwriter, underwriting.loan.agent
+    observer participant
+
+    nonconsuming choice CreateLoanRequest : ContractId FundingRequest
+      with
+        participant : Party
+      controller underwriting.loan.agent
+      do
+        create FundingRequest with
+          agent = underwriting.loan.agent
+          uuid = underwriting.uuid
+          totalApplicationAmount = underwriting.loan.amount
+          participant
+          underwrite = self
+
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
-template LoanRequest
+template FundingRequest
   with
     agent : Party
     uuid : Text
+    underwrite : ContractId UnderwritingDisclosure
     totalApplicationAmount : Numeric 2
     -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
     participant : Party
-    -- ^ The agent creates one 'LoanRequest' for each participant from whom it wants an offer
+    -- ^ The agent creates one 'FundingRequest' for each participant from whom it wants an offer
   where
     signatory agent
     observer participant
-    key (agent, uuid) : (Party, Text)
+    key (agent, participant, uuid) : (Party, Party, Text)
     maintainer key._1
 
+    choice FundingRequest_Respond : ContractId FundingInterest
+      with
+        amount : Numeric 2
+        rate : RatePerAnnum
+      controller participant
+      do
+        disclosed <- fetch underwrite
+        assert $ rate <= disclosed.underwriting.loan.maxInterestRate
+        create FundingInterest with
+          agent
+          uuid
+          participant
+          amount
+          rate
+
 -- | An offer by a participant to loan part (or all of) of the amount specified by the LoanApplication
-template LoanOffer
+template FundingInterest
   with
     agent : Party
     uuid : Text
@@ -91,8 +162,24 @@ template LoanOffer
   where
     signatory participant
     observer agent
-    key (agent, uuid) : (Party, Text)
+    key (participant, agent, uuid) : (Party, Party, Text)
     maintainer key._1
+    choice FundingInterest_SignAgreement : ContractId PendingLoanAgreement
+      with
+        agreementCid : ContractId PendingLoanAgreement
+      controller agent
+      do
+        pendingAgreement <- fetch agreementCid
+        let agreement = pendingAgreement.agreement
+        case Map.lookup this.participant agreement.participantsWithAmounts of
+          None -> fail "Loan terms do not include this lender"
+          Some myAmount -> do
+            assertMsg "Interest offered does not exceed agreed upon rate" $
+              rate >= this.rate
+            assertMsg "Amount required exceeds agreed upon amount" $
+              this.amount >= myAmount
+            exercise agreementCid PendingLoanAgreement_Sign with
+              signer = this.participant
 
 template SyndicatedLoanOffer
   with
@@ -100,7 +187,7 @@ template SyndicatedLoanOffer
     uuid : Text
     borrower : Party
     amount : Numeric 2
-    rate : Decimal
+    rate : RatePerAnnum
     -- other terms: term, fees, covenants, etc.
     --NOTE: Maybe a covenant, once agreed by the borrower, could actually grant access to some on-chain data in the future, which is necessary to enforce it. and this could also trigger on-chain modifications of the loan.
   where
@@ -108,6 +195,15 @@ template SyndicatedLoanOffer
     observer borrower
     key (agent, uuid) : (Party, Text)
     maintainer key._1
+    choice SyndicatedLoanOffer_Accept : ContractId AcceptedLoan
+      controller borrower
+      do
+        create AcceptedLoan with
+          agent
+          borrower
+          amount
+          rate
+
 
 data LoanTerms = LoanTerms with
     amount : Numeric 2 -- Principal. TODO: for now always equal to LoanApplication.amount
@@ -118,17 +214,63 @@ data LoanTerms = LoanTerms with
     -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
       deriving (Eq, Show)
 
+template AcceptedLoan
+  with
+    agent : Party
+    borrower : Party
+    amount : Numeric 2
+    rate : RatePerAnnum
+  where
+    signatory borrower
+    observer agent
+    choice AcceptedLoan_SignAgreement : ContractId PendingLoanAgreement
+      with
+        agreementCid : ContractId PendingLoanAgreement
+      controller agent
+      do
+        agreement <- fetch agreementCid
+        let pendingTerms = agreement.agreement.loanTerms
+        assertMsg "Amount on agreement does not match accepted terms" $
+          this.amount == pendingTerms.amount
+        assertMsg "Interest rate on agreement does not match accepted terms" $
+          this.rate == pendingTerms.rate
+        assertMsg "Borrower does not match" $
+          this.borrower == agreement.agreement.borrower
+        exercise agreementCid PendingLoanAgreement_Sign with
+          signer = this.borrower
+
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
 template LoanAgreement
   with
     agent : Party
-    participants : [Party]
+    participantsWithAmounts : Map Party (Numeric 2)
     borrower : Party
     uuid : Text -- Points to UnderwritingRequest.uuid
     prospectus : Text
     loanTerms : LoanTerms
   where
-    signatory agent, borrower, participants
+    signatory agent, borrower, Map.keys participantsWithAmounts
+    ensure sum (Map.values participantsWithAmounts) == loanTerms.amount
+
+template PendingLoanAgreement
+  with
+    agreement : LoanAgreement
+    signed : [Party]
+  where
+    -- TODO: ensure clause
+    signatory agreement.agent, signed
+    observer (Map.keys agreement.participantsWithAmounts), agreement.borrower
+    choice PendingLoanAgreement_Sign : ContractId PendingLoanAgreement
+      with
+        signer : Party
+      controller signer
+      do
+        create this with
+          signed = signer :: (this.signed)
+    choice PendingLoanAgreement_Finalize : ContractId LoanAgreement
+      controller agreement.agent
+      do
+        create this.agreement
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
@@ -151,8 +293,8 @@ loanAgreementToBond now usd a =
     calendarDataProvider = a.agent -- NOT USED!
     dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
     currency = usd
-    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton a.participants)
-    lastEventTimestamp = now
+    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithAmounts))
+    lastEventTimestamp = error "TODO"
   where
     startDate = toDateUTC now
 
