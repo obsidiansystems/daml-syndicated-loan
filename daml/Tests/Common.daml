@@ -74,6 +74,7 @@ createAccounts LedgerParties{..} = do
       createCmd Fungible.Factory with
         provider = fed_ingrid
         observers = empty
+
     aliceReq <- submit borrower_alice do
       createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed_ingrid
     aliceAccount <- submit fed_ingrid do
@@ -83,8 +84,21 @@ createAccounts LedgerParties{..} = do
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid
         observers = []
+    requestMon <- submit borrower_alice do
+        createCmd CreditAccount.Request with
+          account = aliceAccount
+          instrument = InstrumentKey with
+            issuer = fed_ingrid
+            depository = fed_ingrid
+            id = instrumentId
+            version = instrumentVersion
+          amount = 10000.0
+    x <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
+    xx <- submit borrower_alice do 
+      exerciseCmd Fungible.Split with
+        amounts = [ 5.0 ]
 
-    accountkeys <- forA [1..100] $ \x -> do
+    accountkeys <- forA [1..5] $ \x -> do
       requestCid <- submit lender_hortense do
         createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
       c <- submit fed_ingrid $ do
@@ -94,18 +108,9 @@ createAccounts LedgerParties{..} = do
           accountFactoryCid
           holdingFactoryCid
           observers = [borrower_alice]
-      requestMon <- submit borrower_alice do
-        createCmd CreditAccount.Request with
-          account = aliceAccount
-          instrument = InstrumentKey with
-            issuer = fed_ingrid
-            depository = fed_ingrid
-            id = instrumentId
-            version = instrumentVersion
-          amount = 10000.0
-      x <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
       pure (c, x)
-    
+    pure ()
+    {-
     forA_ (accountkeys) $ \(a, vv) -> do
       b <- submit lender_hortense $ do
         createCmd Transfer.Request with 
@@ -115,6 +120,7 @@ createAccounts LedgerParties{..} = do
           amount = 10000.0
       submit borrower_alice $ exerciseCmd b Transfer.Accept with
         holdingCid = vv
+    -}
 
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
@@ -157,7 +163,7 @@ preOrigination LedgerParties{..} = do
         label = "Hortense@Bank"
         description = "Account of Hortense at Bank"
         accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
+        holdingFactoryCid
         observers = []
 
     -- allocate funds to Hortense
