@@ -149,10 +149,10 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
       loanApplication = LoanApplication with
         borrower = borrower_alice
         agent = agent_charlie
-        duration = durationInYears
         amount
         maxInterestRate = rate
         prospectus = "To test the syndicated loans framework :)"
+        durationYears = 10
   application <- submit borrower_alice $ createCmd loanApplication
   underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma loanApplication)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
@@ -237,7 +237,7 @@ createPendingLoanAgreement agent acceptanceCid fundingCids = do
         loanTerms = LoanTerms with
           amount = acceptance.amount
           rate = acceptance.rate
-          duration = 10 -- TODO: Get this
+          durationYears = 10 -- TODO: Get this
 
   submit agent $ createCmd PendingLoanAgreement with
     agreement
