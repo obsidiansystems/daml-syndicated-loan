@@ -146,6 +146,7 @@ origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgr
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 5.0 -- TODO: Huh
+      uuid = "golden"
       loanApplication = LoanApplication with
         borrower = borrower_alice
         agent = agent_charlie
@@ -156,7 +157,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplication
   -- Agent coordinating the lending first asks an underwriter for a report
-  underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma loanApplication)
+  underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma uuid application)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
   -- Agent with underwriter's report in hand reaches out to possible lenders
   let possibleLenders = [lender_gary, lender_hortense]
@@ -223,11 +224,10 @@ makeFundingInterest lender requestCid (amount, rate) = exerciseCmd requestCid Fu
     amount
     rate
 
-makeUnderwritingRequest : Party -> LoanApplication -> Commands (ContractId UnderwritingRequest)
-makeUnderwritingRequest underwriter loanApplication = createCmd UnderwritingRequest with
+makeUnderwritingRequest : Party -> Text -> ContractId LoanApplication -> Commands (ContractId UnderwritingRequest)
+makeUnderwritingRequest underwriter uuid applicationCid = exerciseCmd applicationCid LoanApplication_CreateUnderwritingRequest with
   underwriter
-  uuid = "golden" -- TODO: Thread these through
-  loan = loanApplication
+  uuid
 
 -- TODO: combine the list of FundingInterest instead of just taking the first element
 selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (RatePerAnnum, [ContractId FundingInterest])
