@@ -1,6 +1,12 @@
 module Workflow.Origination where
 
 import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..))
+import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
+import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
+import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(Act360))
+import qualified DA.Map as Map
+import qualified DA.Set as Set
+type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 
 -- ### TODO
 --   * Include "start date" of the loan (used to calculate coupon payment dates)
@@ -11,7 +17,7 @@ import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..))
 
 -- | Rate per annum.
 -- E.g. "3.5% per annum" is represented as 0.035
-newtype RatePerAnnum = RatePerAnnum Decimal
+newtype RatePerAnnum = RatePerAnnum { unRatePerAnnum : Decimal }
   deriving (Eq, Show)
 
 -- | An application for a loan by a borrower
@@ -122,5 +128,29 @@ template LoanAgreement
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
-loanAgreementToPeriodicSchedule : LoanAgreement -> PeriodicSchedule
-loanAgreementToPeriodicSchedule = error "TODO"
+-- NOTE: pays to agent for now. TODO: pay to participants
+loanAgreementToBond
+  :  Party -- the Fed (the issuer and depository of USD)
+  -> LoanAgreement
+  -> Bond
+loanAgreementToBond fed a =
+  Instrument with
+    depository = a.agent -- same as agent for now
+    issuer = a.borrower
+    id = Id a.uuid
+    version = "0"
+    description = "Fixed-rate bond"
+    couponRate = unRatePerAnnum a.loanTerms.rate
+    periodicSchedule = undefined
+    holidayCalendarIds = [] -- NOT USED!
+    calendarDataProvider = a.agent -- NOT USED!
+    dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
+    currency = usd
+    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton a.participants)
+    lastEventTimestamp = error "TODO"
+  where
+    usd = InstrumentKey with
+      depository = fed
+      issuer = fed
+      id = Id "USD"
+      version = "0"
