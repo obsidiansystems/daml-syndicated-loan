@@ -9,6 +9,7 @@ A syndicated loan is a loan that is issued by multiple parties, called participa
 ## Phases
 
 > There are three principal phases to a syndicated transaction. The first is the pre-mandate phase during which the details of the proposed transaction are pitched, discussed and finalised. This pre-mandate phase is rarely shorter than one month and can be as long as one year depending on factors such as transaction complexity, market conditions and borrower sentiment. The second phase is the post-mandate phase during which the syndication itself takes place, and the facility agreements along with associated documentation are negotiated. It is concluded by the signing of the agreements and associated documentation, and sometimes a closing ceremony. This phase is usually completed in a period of six to eight weeks. The third and final phase is the post-signing phase, which lasts for the life of the facility itself and is rarely shorter than six months (in the case of a bridge loan for example) or longer than five years for standard syndicated transactions, although syndicated transactions on some aircraft and project financings have been contracted for a period of up to 18 years.
+
 -- *Syndicated Lending: Practice and Documentation*
 
 ## Parties
