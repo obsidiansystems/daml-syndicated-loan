@@ -1,3 +1,11 @@
 module Common where
 
 import Daml.Script
+
+data LedgerParties = LedgerParties with
+  alice : Party
+  bob : Party
+
+
+initialTest : LedgerParties -> Script ()
+initialTest parties = pure ()

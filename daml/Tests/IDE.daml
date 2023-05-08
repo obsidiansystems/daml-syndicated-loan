@@ -1,4 +1,15 @@
 module IDE where
+
 import Common
 import Daml.Script
 
+createParties : Script LedgerParties
+createParties = do
+  alice <- allocateParty "Alice"
+  bob <- allocateParty "Bob"
+  pure $ LedgerParties { alice, bob }
+
+initialTestLocal : Script ()
+initialTestLocal = do
+  parties <- createParties
+  initialTest parties

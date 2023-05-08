@@ -1,3 +1,7 @@
 module DamlHub where
+
 import Common
 import Daml.Script
+
+initialTestHub : LedgerParties -> Script ()
+initialTestHub parties = initalTest parties
