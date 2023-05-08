@@ -21,7 +21,7 @@ import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
 import DA.Foldable
 
 import Workflow.Origination
-<<<<<<< HEAD
+
 import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
 import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as SingleCustodian
 import qualified DA.Set as S
@@ -33,14 +33,11 @@ import Daml.Finance.Interface.Settlement.Batch qualified as Batch (I)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (I)
 import Daml.Finance.Interface.Settlement.Types (Step(..))
 import DA.Set (singleton)
-||||||| 36a8b23
-=======
 import Daml.Finance.Interface.Holding.Transferable (Transfer)
 import qualified Daml.Finance.Holding.Fungible as FungibleX
 import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
 import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
 import Daml.Finance.Interface.Holding.Fungible (SplitResult(SplitResult))
->>>>>>> main
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
