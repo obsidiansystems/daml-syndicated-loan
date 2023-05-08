@@ -165,6 +165,22 @@ template FundingInterest
     observer agent
     key (participant, agent, uuid) : (Party, Party, Text)
     maintainer key._1
+    choice FundingInterest_SignAgreement : ContractId PendingLoanAgreement
+      with
+        pendingAgreementCid : ContractId PendingLoanAgreement
+      controller agent
+      do
+        pendingAgreement <- fetch pendingAgreementCid
+        let agreement = pendingAgreement.agreement
+        case Map.lookup this.participant agreement.participantsWithTerms of
+          None -> fail "Loan terms do not include this lender"
+          Some (myAmount, myRate) -> do
+            assertMsg "Interest offered does not exceed agreed upon rate" $
+              myRate >= this.rate
+            assertMsg "Amount required exceeds agreed upon amount" $
+              this.amount >= myAmount
+            exercise pendingAgreementCid PendingLoanAgreement_Sign with
+              signer = this.participant
 
 template SyndicatedLoanOffer
   with
@@ -215,19 +231,18 @@ template AcceptedLoan
         exercise agreementCid PendingLoanAgreement_Sign with
           signer = this.borrower
 
-
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
 template LoanAgreement
   with
     agent : Party
-    participantsWithAmount : Map Party (Numeric 2)
+    participantsWithTerms : Map Party (Numeric 2, RatePerAnnum)
     borrower : Party
     uuid : Text -- Points to UnderwritingRequest.uuid
     prospectus : Text
     loanTerms : LoanTerms
   where
-    signatory agent, borrower, Map.keys participantsWithAmount
-    ensure sum (Map.values participantsWithAmount) == loanTerms.amount
+    signatory agent, borrower, Map.keys participantsWithTerms
+    ensure sum (map fst $ Map.values participantsWithTerms) == loanTerms.amount
 
 template PendingLoanAgreement
   with
@@ -236,7 +251,7 @@ template PendingLoanAgreement
   where
     -- TODO: ensure clause
     signatory agreement.agent, signed
-    observer (Map.keys agreement.participantsWithAmount), agreement.borrower
+    observer (Map.keys agreement.participantsWithTerms), agreement.borrower
     choice PendingLoanAgreement_Sign : ContractId PendingLoanAgreement
       with
         signer : Party
@@ -266,7 +281,7 @@ loanAgreementToBond now usd a =
     calendarDataProvider = a.agent -- NOT USED!
     dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
     currency = usd
-    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithAmount))
+    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithTerms))
     lastEventTimestamp = error "TODO"
   where
     startDate = toDateUTC now
