@@ -1,5 +1,11 @@
 module Tests.Common where
 
+{-
+  ALL Functions in the file should have a type signature of LedgerParties -> Script a, this is because
+  DAML Hub cannot create parties via DAML Scripts. The local LSP can, but we want to be able to test
+  against a live non-stateless ledger
+-}
+
 import Daml.Script
 import Daml.Finance.Interface.Types.Common.Types
 
