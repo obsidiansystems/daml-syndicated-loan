@@ -16,7 +16,8 @@ createParties = do
   fed_ingrid <- allocateParty "Fed_Ingrid"
   pure $ LedgerParties { .. }
 
-initialTestLocal : Script ()
-initialTestLocal = do
+
+perfTestIDE : Script ()
+perfTestIDE = do
   parties <- createParties
-  initialTest parties
+  perfTest parties
