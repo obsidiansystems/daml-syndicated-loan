@@ -135,13 +135,13 @@ template FundingRequest
     key (agent, participant, uuid) : (Party, Party, Text)
     maintainer key._1
 
-    choice CreateLoanOffer : ContractId LoanOffer
+    choice CreateLoanOffer : ContractId FundingInterest
       with
         amount : Numeric 2
         rate : RatePerAnnum
       controller participant
       do
-        create LoanOffer with
+        create FundingInterest with
           agent
           uuid
           participant
@@ -149,7 +149,7 @@ template FundingRequest
           rate
 
 -- | An offer by a participant to loan part (or all of) of the amount specified by the LoanApplication
-template LoanOffer
+template FundingInterest
   with
     agent : Party
     uuid : Text
@@ -169,7 +169,7 @@ template SyndicatedLoanOfferCollector
     uuid : Text
     targetAmount : Numeric 2
     satisfiedAmount : Numeric 2
-    loanOffers : [LoanOffer]
+    loanOffers : [FundingInterest]
   where
     signatory agent
     key (agent, uuid) : (Party, Text)
@@ -177,7 +177,7 @@ template SyndicatedLoanOfferCollector
 
     choice AcceptLoanOffer : ContractId SyndicatedLoanOfferCollector
       with
-        loanOffer : LoanOffer
+        loanOffer : FundingInterest
       controller agent
       do
         assertMsg ("loan targetAmount " <> show targetAmount <> " already satisfied: " <> show satisfiedAmount) $
@@ -190,7 +190,7 @@ template SyndicatedLoanOfferCollector
           uuid
           targetAmount
           satisfiedAmount = satisfiedAmount + actualLoanAmount
-          loanOffers = loanOffer{amount = actualLoanAmount} :: loanOffers -- TODO: how to make the modified LoanOffer visible to participant
+          loanOffers = loanOffer{amount = actualLoanAmount} :: loanOffers -- TODO: how to make the modified FundingInterest visible to participant
 
     -- choice CreateSyndicatedLoanOffer : ContractId SyndicatedLoanOffer
     --   controller agent

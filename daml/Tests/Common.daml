@@ -200,8 +200,8 @@ makeFundingRequest agent amount underwriteCid lender = do
 getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
 getFundingRequestsFor lender = query @FundingRequest lender
 
-makeFundingInterest : Party -> ContractId FundingRequest -> FundingRequest -> (Amount, RatePerAnnum) -> Commands (ContractId LoanOffer)
-makeFundingInterest lender _ loanRequest (amount, rate) = createCmd LoanOffer with
+makeFundingInterest : Party -> ContractId FundingRequest -> FundingRequest -> (Amount, RatePerAnnum) -> Commands (ContractId FundingInterest)
+makeFundingInterest lender _ loanRequest (amount, rate) = createCmd FundingInterest with
     agent = loanRequest.agent
     uuid = "golden" -- TODO: Thread these through
     participant = lender
@@ -214,11 +214,11 @@ makeUnderwritingRequest underwriter loanApplication = createCmd UnderwritingRequ
   uuid = "golden" -- TODO: Thread these through
   loan = loanApplication
 
-selectFundingInterests : [(ContractId LoanOffer, LoanOffer)] -> Script (RatePerAnnum, [(ContractId LoanOffer, Amount)])
+selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (RatePerAnnum, [(ContractId FundingInterest, Amount)])
 selectFundingInterests ((offerCid, offer)::interests) = pure (offer.rate, [(offerCid, offer.amount)])
 selectFundingInterests [] = fail "No interests to fund loan"
 
-createPendingLoanAgreement : Party -> ContractId AcceptedLoan -> [(ContractId LoanOffer, Amount)] -> Script (ContractId PendingLoanAgreement)
+createPendingLoanAgreement : Party -> ContractId AcceptedLoan -> [(ContractId FundingInterest, Amount)] -> Script (ContractId PendingLoanAgreement)
 createPendingLoanAgreement agent acceptanceCid fundingCids = do
   Some acceptance <- queryContractId agent acceptanceCid
   lendersWithAmounts <- forA fundingCids $ \(offerCid, amount) -> do
