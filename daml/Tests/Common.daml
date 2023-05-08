@@ -153,22 +153,29 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
         maxInterestRate = rate
         prospectus = "To test the syndicated loans framework :)"
         durationYears = 10
+  -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplication
+  -- Agent coordinating the lending first asks an underwriter for a report
   underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma loanApplication)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
+  -- Agent with underwriter's report in hand reaches out to possible lenders
   let possibleLenders = [lender_gary, lender_hortense]
   forA_ possibleLenders $ \lender -> do
     makeFundingRequest agent_charlie amount underwritingResult lender
+  -- Lenders make their offers
+  -- TODO: Lenders declining to make an offer
   fundingInterestCids <- forA possibleLenders $ \lender -> do
     [(fundingRequestCid, fundingRequest)] <- getFundingRequestsFor lender
     submit lender $ makeFundingInterest lender fundingRequestCid fundingRequest (amount, rate)
   fundingInterests <- forA fundingInterestCids $ \cid -> do
     Some fundingInterest <- queryContractId agent_charlie cid
     pure (cid, fundingInterest)
-  -- Accepting final loan
+  -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
   (rate, selectedFundingInterests) <- selectFundingInterests fundingInterests
   loanProposal <- submit agent_charlie $ createLoanProposal agent_charlie borrower_alice amount rate
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
+  -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
+  -- and gathers the signatures that have been authorized.
   pendingAgreement <- createPendingLoanAgreement agent_charlie acceptedLoan selectedFundingInterests
   borrowerSigned <- submit agent_charlie $ do
     exerciseCmd acceptedLoan $ AcceptedLoan_SignAgreement with
@@ -177,6 +184,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     (\agreementCid fundingInterestCid -> submit agent_charlie $ exerciseCmd fundingInterestCid FundingInterest_SignAgreement with agreementCid)
     borrowerSigned
     selectedFundingInterests
+  -- Agent constructs the final, fully signed loan agreement— ready for settlement
   submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
 
 type Amount = Numeric 2
