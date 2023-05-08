@@ -1,0 +1,4 @@
+module IDE where
+import Common
+import Daml.Script
+
