@@ -17,6 +17,8 @@ import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible (Factory(..))
 import DA.Foldable
 
+import Workflow.Origination
+
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
 -- and divulgence.
@@ -111,15 +113,7 @@ preOrigination LedgerParties{..} = do
     return $ PreOriginationStuff with
       aliceAccount
 
-template Loan
-  with
-    borrower : Party
-    agent : Party
-    lenders : [Party]
-  where
-    signatory borrower, agent, lenders
-
-origination : LedgerParties -> PreOriginationStuff -> Script (ContractId Loan)
+origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgreement)
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
   application <- submit borrower_alice $ makeLoanApplication amount
@@ -138,14 +132,6 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   loanProposal <- submit agent_charlie $ createLoanProposal borrower_alice amount rate
   acceptedLoan <- submit borrower_alice $ acceptLoanProposal loanProposal
   submit agent_charlie $ createFinalLoan acceptedLoan selectedFundingInterests
-
-data LoanApplication
-data UnderwritingRequest
-data UnderwritingResult
-data AcceptedLoan
-data FundingInterest
-data LoanProposal
-data FundingRequest
 
 type Amount = Numeric 2
 type Rate = Decimal
@@ -168,7 +154,7 @@ makeUnderwritingRequest = undefined
 selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (Rate, [(ContractId FundingInterest, Amount)])
 selectFundingInterests = undefined
 
-createFinalLoan : ContractId AcceptedLoan -> [(ContractId FundingInterest, Amount)] -> Commands (ContractId Loan)
+createFinalLoan : ContractId AcceptedLoan -> [(ContractId FundingInterest, Amount)] -> Commands (ContractId LoanAgreement)
 createFinalLoan = undefined
 
 createLoanProposal : Party -> Amount -> Rate -> Commands (ContractId LoanProposal)
@@ -180,6 +166,6 @@ acceptLoanProposal = undefined
 makeFundingInterest : ContractId FundingRequest -> FundingRequest -> [(Amount, Rate)] -> Commands (ContractId FundingInterest)
 makeFundingInterest = undefined
 
-servicing : LedgerParties -> ContractId Loan -> Script ()
+servicing : LedgerParties -> ContractId LoanAgreement -> Script ()
 servicing LedgerParties{..} loan = do
   pure ()
