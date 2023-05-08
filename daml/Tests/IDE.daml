@@ -2,7 +2,6 @@ module Tests.IDE where
 
 import Tests.Common
 import Daml.Script
-import Daml.Finance.Interface.Types.Common.Types
 
 createParties : Script LedgerParties
 createParties = do
