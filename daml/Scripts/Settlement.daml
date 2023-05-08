@@ -146,10 +146,10 @@ runSettlement = do
       couponRate = 0.005
       periodicSchedule
       holidayCalendarIds = []
-      calendarDataProvider = undefined
+      calendarDataProvider = bank
       dayCountConvention = Act365Fixed
       currency = usdInstrument
-      lastEventTimestamp = toUTCTime (DateClock.Unit (date 10 Apr 2028))
+      lastEventTimestamp = toUTCTime (DateClock.Unit (date 2028 Apr 10))
 
 
 
