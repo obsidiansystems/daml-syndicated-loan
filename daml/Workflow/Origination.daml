@@ -136,7 +136,7 @@ template FundingRequest
     key (agent, participant, uuid) : (Party, Party, Text)
     maintainer key._1
 
-    choice CreateLoanOffer : ContractId FundingInterest
+    choice FundingRequest_Respond : ContractId FundingInterest
       with
         amount : Numeric 2
         rate : RatePerAnnum
@@ -167,10 +167,10 @@ template FundingInterest
     maintainer key._1
     choice FundingInterest_SignAgreement : ContractId PendingLoanAgreement
       with
-        pendingAgreementCid : ContractId PendingLoanAgreement
+        agreementCid : ContractId PendingLoanAgreement
       controller agent
       do
-        pendingAgreement <- fetch pendingAgreementCid
+        pendingAgreement <- fetch agreementCid
         let agreement = pendingAgreement.agreement
         case Map.lookup this.participant agreement.participantsWithTerms of
           None -> fail "Loan terms do not include this lender"
@@ -179,7 +179,7 @@ template FundingInterest
               myRate >= this.rate
             assertMsg "Amount required exceeds agreed upon amount" $
               this.amount >= myAmount
-            exercise pendingAgreementCid PendingLoanAgreement_Sign with
+            exercise agreementCid PendingLoanAgreement_Sign with
               signer = this.participant
 
 template SyndicatedLoanOffer
@@ -259,6 +259,10 @@ template PendingLoanAgreement
       do
         create this with
           signed = signer :: (this.signed)
+    choice PendingLoanAgreement_Finalize : ContractId LoanAgreement
+      controller agreement.agent
+      do
+        create this.agreement
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 

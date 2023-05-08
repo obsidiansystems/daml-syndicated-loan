@@ -6,6 +6,7 @@ module Tests.Common where
   against a live non-stateless ledger
 -}
 
+import DA.Action
 import DA.Map (empty)
 import qualified DA.Map as Map
 import Daml.Script
@@ -141,7 +142,7 @@ preOrigination LedgerParties{..} = do
     return $ PreOriginationStuff with
       aliceAccount
 
-origination : LedgerParties -> PreOriginationStuff -> Script (ContractId PendingLoanAgreement)
+origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgreement)
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 5.0 -- TODO: Huh
@@ -168,7 +169,15 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   (rate, selectedFundingInterests) <- selectFundingInterests fundingInterests
   loanProposal <- submit agent_charlie $ createLoanProposal agent_charlie borrower_alice amount rate
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
-  createPendingLoanAgreement agent_charlie acceptedLoan selectedFundingInterests
+  pendingAgreement <- createPendingLoanAgreement agent_charlie acceptedLoan selectedFundingInterests
+  borrowerSigned <- submit agent_charlie $ do
+    exerciseCmd acceptedLoan $ AcceptedLoan_SignAgreement with
+      agreementCid = pendingAgreement
+  lendersSigned <- foldlA
+    (\agreementCid fundingInterestCid -> submit agent_charlie $ exerciseCmd fundingInterestCid FundingInterest_SignAgreement with agreementCid)
+    borrowerSigned
+    selectedFundingInterests
+  submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
 
 type Amount = Numeric 2
 
@@ -258,6 +267,6 @@ acceptLoanProposal borrower offerCid = do
     rate = offer.rate
 
 -- TODO: This will take a LoanAgreement once we have multi-party signing implemented
-servicing : LedgerParties -> ContractId PendingLoanAgreement -> Script ()
+servicing : LedgerParties -> ContractId LoanAgreement -> Script ()
 servicing LedgerParties{..} loan = do
   pure ()
