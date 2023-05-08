@@ -75,25 +75,25 @@ template UnderwritingRequest
       do
         create UnderwritingResult with
           underwriter
-          agent = loan.agent
+          loan
           uuid
           result
 
 template UnderwritingResult
   with
     underwriter : Party
-    agent : Party
     uuid : Text
+    loan : LoanApplication
     result : Bool
   where
-    signatory agent, underwriter
-    key (underwriter, agent, uuid) : (Party, Party, Text)
+    signatory loan.agent, underwriter
+    key (underwriter, loan.agent, uuid) : (Party, Party, Text)
     maintainer key._1
 
     nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
       with
         disclose_to : Party
-      controller agent
+      controller loan.agent
       do
         create UnderwritingDisclosure with
           underwriting = this
@@ -104,19 +104,18 @@ template UnderwritingDisclosure
     underwriting : UnderwritingResult
     participant : Party
   where
-    signatory underwriting.underwriter, underwriting.agent
+    signatory underwriting.underwriter, underwriting.loan.agent
     observer participant
 
     nonconsuming choice CreateLoanRequest : ContractId FundingRequest
       with
         participant : Party
-      controller underwriting.agent
+      controller underwriting.loan.agent
       do
-        (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (underwriting.agent, underwriting.uuid)
         create FundingRequest with
-          agent = underwriting.agent
+          agent = underwriting.loan.agent
           uuid = underwriting.uuid
-          totalApplicationAmount = underwritingRequest.loan.amount
+          totalApplicationAmount = underwriting.loan.amount
           participant
           underwrite = self
 
@@ -142,8 +141,8 @@ template FundingRequest
         rate : RatePerAnnum
       controller participant
       do
-        (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (agent, uuid)
-        assert $ rate <= underwritingRequest.loan.maxInterestRate
+        disclosed <- fetch underwrite
+        assert $ rate <= disclosed.underwriting.loan.maxInterestRate
         create FundingInterest with
           agent
           uuid
@@ -172,11 +171,11 @@ template FundingInterest
       do
         pendingAgreement <- fetch agreementCid
         let agreement = pendingAgreement.agreement
-        case Map.lookup this.participant agreement.participantsWithTerms of
+        case Map.lookup this.participant agreement.participantsWithAmounts of
           None -> fail "Loan terms do not include this lender"
-          Some (myAmount, myRate) -> do
+          Some myAmount -> do
             assertMsg "Interest offered does not exceed agreed upon rate" $
-              myRate >= this.rate
+              rate >= this.rate
             assertMsg "Amount required exceeds agreed upon amount" $
               this.amount >= myAmount
             exercise agreementCid PendingLoanAgreement_Sign with
@@ -235,14 +234,14 @@ template AcceptedLoan
 template LoanAgreement
   with
     agent : Party
-    participantsWithTerms : Map Party (Numeric 2, RatePerAnnum)
+    participantsWithAmounts : Map Party (Numeric 2)
     borrower : Party
     uuid : Text -- Points to UnderwritingRequest.uuid
     prospectus : Text
     loanTerms : LoanTerms
   where
-    signatory agent, borrower, Map.keys participantsWithTerms
-    ensure sum (map fst $ Map.values participantsWithTerms) == loanTerms.amount
+    signatory agent, borrower, Map.keys participantsWithAmounts
+    ensure sum (Map.values participantsWithAmounts) == loanTerms.amount
 
 template PendingLoanAgreement
   with
@@ -251,7 +250,7 @@ template PendingLoanAgreement
   where
     -- TODO: ensure clause
     signatory agreement.agent, signed
-    observer (Map.keys agreement.participantsWithTerms), agreement.borrower
+    observer (Map.keys agreement.participantsWithAmounts), agreement.borrower
     choice PendingLoanAgreement_Sign : ContractId PendingLoanAgreement
       with
         signer : Party
@@ -285,7 +284,7 @@ loanAgreementToBond now usd a =
     calendarDataProvider = a.agent -- NOT USED!
     dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
     currency = usd
-    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithTerms))
+    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithAmounts))
     lastEventTimestamp = error "TODO"
   where
     startDate = toDateUTC now
