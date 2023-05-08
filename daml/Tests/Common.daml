@@ -11,6 +11,7 @@ import DA.Set (singleton)
 import Daml.Script
 import Daml.Finance.Interface.Types.Common.Types
 import Workflow.CreateAccount qualified as CreateAccount
+import Workflow.CreditAccount qualified as CreditAccount
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
@@ -77,6 +78,19 @@ preOrigination LedgerParties{..} = do
         holdingFactoryCid = holdingFactoryCid
         observers = []
 
+    -- allocate funds to Hortense
+    hortenseRequestCid <- submit lender_hortense do
+      createCmd CreditAccount.Request with
+        account = hortenseAccount
+        instrument = InstrumentKey with
+          issuer = fed_ingrid
+          depository = fed_ingrid
+          id = instrumentId
+          version = instrumentVersion
+        amount = 100_000_000.00
+
+    hortenseCashHoldingCid <- submit fed_ingrid do exerciseCmd hortenseRequestCid CreditAccount.Accept
+
     -- ...for Gary's Bank
     garyRequestCid <- submit lender_gary do
       createCmd CreateAccount.Request with owner = lender_gary; custodian = fed_ingrid
@@ -87,6 +101,19 @@ preOrigination LedgerParties{..} = do
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
         observers = []
+
+    -- allocate funds to Gary
+    garyRequestCid <- submit lender_gary do
+      createCmd CreditAccount.Request with
+        account = garyAccount
+        instrument = InstrumentKey with
+          issuer = fed_ingrid
+          depository = fed_ingrid
+          id = instrumentId
+          version = instrumentVersion
+        amount = 50_000_000.00
+
+    garyCashHoldingCid <- submit fed_ingrid do exerciseCmd garyRequestCid CreditAccount.Accept
 
     -- ...for Bob's Company
     bobRequestCid <- submit borrower_bob do
