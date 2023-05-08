@@ -25,7 +25,7 @@ import Daml.Finance.Interface.Holding.Transferable (Transfer)
 import qualified Daml.Finance.Holding.Fungible as FungibleX
 import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
 import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
-import Daml.Finance.Interface.Holding.Fungible (SplitResult(SplitResult))
+import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(SplitResult))
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -95,7 +95,7 @@ createAccounts LedgerParties{..} = do
           amount = 10000.0
     x <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
     xx <- submit borrower_alice do 
-      exerciseCmd Fungible.Split with
+      exerciseCmd (coerceInterfaceContractId @Fungible x) Fungible.Split with
         amounts = [ 5.0 ]
 
     accountkeys <- forA [1..5] $ \x -> do
