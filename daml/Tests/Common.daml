@@ -2,6 +2,7 @@ module Common where
 
 import Daml.Script
 import Daml.Finance.Interface.Types.Common.Types
+import Workflow.CreateAccount qualified as CreateAccount
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -36,5 +37,49 @@ preOrigination LedgerParties{..}= do
           version = instrumentVersion
 
     -- Create USD Accounts for Banks and Companies
+
+    -- ...for Hortenses's Bank
+    hortenseRequestCid <- submit lender_hortense do
+      createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
+    hortenseAccount <- submit fed_ingrid do
+      exerciseCmd hortenseRequestCid CreateAccount.Accept with
+        label = "Hortense@Bank"
+        description = "Account of Hortense at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
+
+    -- ...for Gary's Bank
+    garyRequestCid <- submit lender_gary do
+      createCmd CreateAccount.Request with owner = lender_gary; custodian = fed_ingrid
+    garyAccount <- submit fed_ingrid do
+      exerciseCmd garyRequestCid CreateAccount.Accept with
+        label = "Gary@Bank"
+        description = "Account of Bob at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
+
+    -- ...for Bob's Company
+    bobRequestCid <- submit borrower_bob do
+      createCmd CreateAccount.Request with owner = borrower_bob; custodian = fed_ingrid
+    bobAccount <- submit fed_ingrid do
+      exerciseCmd bobRequestCid CreateAccount.Accept with
+        label = "Bob@Fed"
+        description = "Account of Bob at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
+
+    -- ...for Alice's Company
+    aliceRequestCid <- submit borrower_alice do
+      createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed_ingrid
+    aliceAccount <- submit fed_ingrid do
+      exerciseCmd aliceRequestCid CreateAccount.Accept with
+        label = "Alice@Bank"
+        description = "Account of Alice at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
 
     return ()
