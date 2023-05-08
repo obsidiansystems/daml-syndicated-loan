@@ -13,13 +13,15 @@ import Daml.Script
 import Daml.Finance.Interface.Types.Common.Types
 import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
+import Workflow.Transfer qualified as Transfer
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
-import Daml.Finance.Holding.Fungible qualified as Fungible (Factory(..))
+import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
 import DA.Foldable
 
 import Workflow.Origination
+<<<<<<< HEAD
 import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
 import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as SingleCustodian
 import qualified DA.Set as S
@@ -31,6 +33,14 @@ import Daml.Finance.Interface.Settlement.Batch qualified as Batch (I)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (I)
 import Daml.Finance.Interface.Settlement.Types (Step(..))
 import DA.Set (singleton)
+||||||| 36a8b23
+=======
+import Daml.Finance.Interface.Holding.Transferable (Transfer)
+import qualified Daml.Finance.Holding.Fungible as FungibleX
+import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
+import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
+import Daml.Finance.Interface.Holding.Fungible (SplitResult(SplitResult))
+>>>>>>> main
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -47,6 +57,79 @@ data LedgerParties = LedgerParties with
     fed_ingrid : Party
   deriving (Show, Eq, Ord)
 
+perfTest : LedgerParties -> Script ()
+perfTest parties = do
+  let LedgerParties{..} = parties
+      instrumentId = Id "USD"
+      instrumentVersion = "0"
+      usdInstrument = InstrumentKey with
+        issuer = fed_ingrid
+        depository = fed_ingrid
+        id = instrumentId
+        version = instrumentVersion
+  accountkeys <- createAccounts parties
+  pure ()
+
+
+--createAccounts : LedgerParties -> Script [AccountKey]
+createAccounts LedgerParties{..} = do
+    let instrumentId = Id "USD"
+        instrumentVersion = "0"
+        usdInstrument = InstrumentKey with
+          issuer = fed_ingrid
+          depository = fed_ingrid
+          id = instrumentId
+          version = instrumentVersion
+
+    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed_ingrid do
+      createCmd Account.Factory with provider = fed_ingrid; observers = empty
+
+    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
+      createCmd Fungible.Factory with
+        provider = fed_ingrid
+        observers = empty
+    aliceReq <- submit borrower_alice do
+      createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed_ingrid
+    aliceAccount <- submit fed_ingrid do
+      exerciseCmd aliceReq CreateAccount.Accept with
+        label = "Alice@Fed"
+        description = "null"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid
+        observers = []
+
+    accountkeys <- forA [1..100] $ \x -> do
+      requestCid <- submit lender_hortense do
+        createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
+      c <- submit fed_ingrid $ do
+        exerciseCmd requestCid CreateAccount.Accept with
+          label = (show x)
+          description = "null"
+          accountFactoryCid
+          holdingFactoryCid
+          observers = [borrower_alice]
+      requestMon <- submit borrower_alice do
+        createCmd CreditAccount.Request with
+          account = aliceAccount
+          instrument = InstrumentKey with
+            issuer = fed_ingrid
+            depository = fed_ingrid
+            id = instrumentId
+            version = instrumentVersion
+          amount = 10000.0
+      x <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
+      pure (c, x)
+    
+    forA_ (accountkeys) $ \(a, vv) -> do
+      b <- submit lender_hortense $ do
+        createCmd Transfer.Request with 
+          receiverAccount = a
+          instrument = usdInstrument
+          currentOwner = borrower_alice
+          amount = 10000.0
+      submit borrower_alice $ exerciseCmd b Transfer.Accept with
+        holdingCid = vv
+
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
   stuff <- preOrigination parties
@@ -54,7 +137,17 @@ initialTest parties = do
   servicing parties loan
 
 data PreOriginationStuff = PreOriginationStuff with
-  aliceAccount : AccountKey
+  usdInstrument : InstrumentKey
+  ledgerAccounts : LedgerAccounts
+
+data LedgerAccounts = LedgerAccounts with
+    aliceAccount : AccountKey
+    bobAccount : AccountKey
+    charlieAccount : AccountKey
+    debbieAccount : AccountKey
+    garyAccount : AccountKey
+    hortenseAccount : AccountKey
+  deriving (Show, Eq, Ord)
 
 -- Pre-origination
 preOrigination : LedgerParties -> Script PreOriginationStuff
@@ -95,11 +188,7 @@ preOrigination LedgerParties{..} = do
     hortenseRequestCid <- submit lender_hortense do
       createCmd CreditAccount.Request with
         account = hortenseAccount
-        instrument = InstrumentKey with
-          issuer = fed_ingrid
-          depository = fed_ingrid
-          id = instrumentId
-          version = instrumentVersion
+        instrument = usdInstrument
         amount = 100_000_000.00
 
     hortenseCashHoldingCid <- submit fed_ingrid do exerciseCmd hortenseRequestCid CreditAccount.Accept
@@ -119,11 +208,7 @@ preOrigination LedgerParties{..} = do
     garyRequestCid <- submit lender_gary do
       createCmd CreditAccount.Request with
         account = garyAccount
-        instrument = InstrumentKey with
-          issuer = fed_ingrid
-          depository = fed_ingrid
-          id = instrumentId
-          version = instrumentVersion
+        instrument = usdInstrument
         amount = 50_000_000.00
 
     garyCashHoldingCid <- submit fed_ingrid do exerciseCmd garyRequestCid CreditAccount.Accept
@@ -149,14 +234,39 @@ preOrigination LedgerParties{..} = do
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
         observers = []
+    
+    -- ...for Charlie's agency
+    charlieRequestCid <- submit agent_charlie do
+      createCmd CreateAccount.Request with owner = agent_charlie; custodian = fed_ingrid
+    charlieAccount <- submit fed_ingrid do
+      exerciseCmd charlieRequestCid CreateAccount.Accept with
+        label = "Charlie@Bank"
+        description = "Account of Charlie at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
 
+    -- ...for Debbie's agency
+    debbieRequestCid <- submit agent_debbie do
+      createCmd CreateAccount.Request with owner = agent_debbie; custodian = fed_ingrid
+    debbieAccount <- submit fed_ingrid do
+      exerciseCmd charlieRequestCid CreateAccount.Accept with
+        label = "Debbie@Bank"
+        description = "Account of Debbie at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
+
+    let ledgerAccounts = LedgerAccounts with ..
     return $ PreOriginationStuff with
-      aliceAccount
+      usdInstrument
+      ledgerAccounts
 
 origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgreement)
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 5.0 -- TODO: Huh
+      uuid = "golden"
       loanApplication = LoanApplication with
         borrower = borrower_alice
         agent = agent_charlie
@@ -167,7 +277,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplication
   -- Agent coordinating the lending first asks an underwriter for a report
-  underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma loanApplication)
+  underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma uuid application)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
   -- Agent with underwriter's report in hand reaches out to possible lenders
   let possibleLenders = [lender_gary, lender_hortense]
@@ -234,11 +344,10 @@ makeFundingInterest lender requestCid (amount, rate) = exerciseCmd requestCid Fu
     amount
     rate
 
-makeUnderwritingRequest : Party -> LoanApplication -> Commands (ContractId UnderwritingRequest)
-makeUnderwritingRequest underwriter loanApplication = createCmd UnderwritingRequest with
+makeUnderwritingRequest : Party -> Text -> ContractId LoanApplication -> Commands (ContractId UnderwritingRequest)
+makeUnderwritingRequest underwriter uuid applicationCid = exerciseCmd applicationCid LoanApplication_CreateUnderwritingRequest with
   underwriter
-  uuid = "golden" -- TODO: Thread these through
-  loan = loanApplication
+  uuid
 
 -- TODO: combine the list of FundingInterest instead of just taking the first element
 selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (RatePerAnnum, [ContractId FundingInterest])
@@ -276,12 +385,7 @@ createLoanProposal agent borrower amount rate = createCmd SyndicatedLoanOffer wi
 
 acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoan)
 acceptLoanProposal borrower offerCid = do
-  Some offer <- queryContractId borrower offerCid
-  submit borrower $ createCmd AcceptedLoan with
-    agent = offer.agent
-    borrower
-    amount = offer.amount
-    rate = offer.rate
+  submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
 -- TODO: This will take a LoanAgreement once we have multi-party signing implemented
 servicing : LedgerParties -> ContractId LoanAgreement -> Script ()

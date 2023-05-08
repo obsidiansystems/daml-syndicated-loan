@@ -4,6 +4,10 @@ import Daml.Finance.Interface.Account.Account qualified as Account (Credit(..), 
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
 import Daml.Finance.Interface.Types.Common.Types (AccountKey(..), InstrumentKey)
 import Daml.Finance.Interface.Util.Common (qty)
+import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
+import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
+
+
 
 -- | Initiate / Accept template to credit a holding to an existing account.
 template Request

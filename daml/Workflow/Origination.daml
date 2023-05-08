@@ -45,7 +45,7 @@ template LoanApplication
     signatory borrower
     observer agent
 
-    choice CreateUnderwritingRequest : ContractId UnderwritingRequest
+    nonconsuming choice LoanApplication_CreateUnderwritingRequest : ContractId UnderwritingRequest
       with
         underwriter : Party
         uuid : Text
@@ -55,7 +55,7 @@ template LoanApplication
         create UnderwritingRequest with
           underwriter
           uuid
-          loan = error "TODO"
+          loan = this
 
 template UnderwritingRequest
   with
@@ -75,7 +75,9 @@ template UnderwritingRequest
       do
         create UnderwritingResult with
           underwriter
-          loan
+          agent = loan.agent
+          amount = loan.amount
+          maxInterestRate = loan.maxInterestRate
           uuid
           result
 
@@ -83,17 +85,19 @@ template UnderwritingResult
   with
     underwriter : Party
     uuid : Text
-    loan : LoanApplication
+    agent : Party
+    amount : Numeric 2
+    maxInterestRate : RatePerAnnum
     result : Bool
   where
-    signatory loan.agent, underwriter
-    key (underwriter, loan.agent, uuid) : (Party, Party, Text)
+    signatory agent, underwriter
+    key (underwriter, agent, uuid) : (Party, Party, Text)
     maintainer key._1
 
     nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
       with
         disclose_to : Party
-      controller loan.agent
+      controller agent
       do
         create UnderwritingDisclosure with
           underwriting = this
@@ -104,18 +108,18 @@ template UnderwritingDisclosure
     underwriting : UnderwritingResult
     participant : Party
   where
-    signatory underwriting.underwriter, underwriting.loan.agent
+    signatory underwriting.underwriter, underwriting.agent
     observer participant
 
     nonconsuming choice CreateLoanRequest : ContractId FundingRequest
       with
         participant : Party
-      controller underwriting.loan.agent
+      controller underwriting.agent
       do
         create FundingRequest with
-          agent = underwriting.loan.agent
+          agent = underwriting.agent
           uuid = underwriting.uuid
-          totalApplicationAmount = underwriting.loan.amount
+          totalApplicationAmount = underwriting.amount
           participant
           underwrite = self
 
@@ -142,7 +146,8 @@ template FundingRequest
       controller participant
       do
         disclosed <- fetch underwrite
-        assert $ rate <= disclosed.underwriting.loan.maxInterestRate
+        assertMsg "Must respond with an interest rate less than the maximum underwritten" $
+          rate <= disclosed.underwriting.maxInterestRate
         create FundingInterest with
           agent
           uuid
@@ -195,6 +200,15 @@ template SyndicatedLoanOffer
     observer borrower
     key (agent, uuid) : (Party, Text)
     maintainer key._1
+    choice SyndicatedLoanOffer_Accept : ContractId AcceptedLoan
+      controller borrower
+      do
+        create AcceptedLoan with
+          agent
+          borrower
+          amount
+          rate
+
 
 data LoanTerms = LoanTerms with
     amount : Numeric 2 -- Principal. TODO: for now always equal to LoanApplication.amount
@@ -266,12 +280,12 @@ template PendingLoanAgreement
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
 -- NOTE: pays to agent for now. TODO: pay to participants
-loanAgreementToBond
+loanAgreementToBondAndAmount
   :  Time -- Current time
   -> InstrumentKey -- USD
   -> LoanAgreement
-  -> Bond
-loanAgreementToBond now usd a =
+  -> (Bond, Numeric 2)
+loanAgreementToBondAndAmount now usd a = (, a.loanTerms.amount)
   Instrument with
     depository = a.agent -- same as agent for now
     issuer = a.borrower
