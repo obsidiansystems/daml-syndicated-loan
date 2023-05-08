@@ -165,6 +165,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   fundingInterests <- forA fundingInterestCids $ \cid -> do
     Some fundingInterest <- queryContractId agent_charlie cid
     pure (cid, fundingInterest)
+  -- Accepting final loan
   (rate, selectedFundingInterests) <- selectFundingInterests fundingInterests
   loanProposal <- submit agent_charlie $ createLoanProposal agent_charlie borrower_alice amount rate
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
@@ -214,6 +215,7 @@ makeUnderwritingRequest underwriter loanApplication = createCmd UnderwritingRequ
   uuid = "golden" -- TODO: Thread these through
   loan = loanApplication
 
+-- TODO: combine the list of FundingInterest instead of just taking the first element
 selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (RatePerAnnum, [(ContractId FundingInterest, Amount)])
 selectFundingInterests ((offerCid, offer)::interests) = pure (offer.rate, [(offerCid, offer.amount)])
 selectFundingInterests [] = fail "No interests to fund loan"

@@ -13,6 +13,7 @@ import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConv
 import DA.Date (addDays, toDateUTC)
 import DA.Set (Set)
 import DA.Assert
+
 type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 
 -- ### TODO
@@ -141,6 +142,8 @@ template FundingRequest
         rate : RatePerAnnum
       controller participant
       do
+        (_, underwritingRequest) <- fetchByKey @UnderwritingRequest (agent, uuid)
+        assert $ rate <= underwritingRequest.loan.maxInterestRate
         create FundingInterest with
           agent
           uuid
@@ -208,6 +211,7 @@ template LoanAgreement
     loanTerms : LoanTerms
   where
     signatory agent, borrower, Map.keys participantsWithAmount
+    ensure sum (Map.values participantsWithAmount) == loanTerms.amount
 
 template PendingLoanAgreement
   with
