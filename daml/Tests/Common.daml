@@ -6,9 +6,15 @@ module Tests.Common where
   against a live non-stateless ledger
 -}
 
+import DA.Map (empty, fromList)
+import DA.Set (singleton)
 import Daml.Script
 import Daml.Finance.Interface.Types.Common.Types
 import Workflow.CreateAccount qualified as CreateAccount
+import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import Daml.Finance.Account.Account qualified as Account (Factory(..))
+import Daml.Finance.Holding.Fungible qualified as Fungible (Factory(..))
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -43,6 +49,13 @@ preOrigination LedgerParties{..}= do
           version = instrumentVersion
 
     -- Create USD Accounts for Banks and Companies
+    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed_ingrid do
+      createCmd Account.Factory with provider = fed_ingrid; observers = empty
+
+    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
+      createCmd Fungible.Factory with
+        provider = fed_ingrid
+        observers = empty -- fromList [("PublicObserver", singleton public )]
 
     -- ...for Hortenses's Bank
     hortenseRequestCid <- submit lender_hortense do
