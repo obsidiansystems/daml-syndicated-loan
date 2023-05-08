@@ -2,7 +2,9 @@ module IDE where
 
 import Common
 import Daml.Script
+import Daml.Finance.Interface.Types.Common.Types
 
+<<<<<<< Updated upstream
 createParties : Script LedgerParties
 createParties = do
   borrower_alice <- allocateParty "Borrower_Alice"
@@ -20,3 +22,28 @@ initialTestLocal : Script ()
 initialTestLocal = do
   parties <- createParties
   initialTest parties
+=======
+-- Pre-origination
+preOrigination : Script ()
+preOrigination = do
+    -- Create the Fed
+    fed <- allocateParty "Fed"
+    
+    -- Create USD
+    let instrumentId = Id "USD"
+        instrumentVersion = "0"
+        usdInstrument = InstrumentKey with
+          issuer = fed
+          depository = fed
+          id = instrumentId
+          version = instrumentVersion
+
+    -- Create some Banks
+    boa <- allocateParty "BoA"
+    chase <- allocateParty "Chase"
+
+    -- Create some Companies
+
+    -- Create USD Accounts for Banks and Companies
+    return ()
+>>>>>>> Stashed changes

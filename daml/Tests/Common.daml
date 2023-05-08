@@ -1,6 +1,7 @@
 module Common where
 
 import Daml.Script
+import Daml.Finance.Interface.Types.Common.Types
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -19,3 +20,21 @@ data LedgerParties = LedgerParties with
 
 initialTest : LedgerParties -> Script ()
 initialTest parties = pure ()
+
+-- Pre-origination
+preOrigination : LedgerParties -> Script ()
+preOrigination LedgerParties{..}= do
+    -- Create the Fed
+    
+    -- Create USD
+    let instrumentId = Id "USD"
+        instrumentVersion = "0"
+        usdInstrument = InstrumentKey with
+          issuer = fed_ingrid
+          depository = fed_ingrid
+          id = instrumentId
+          version = instrumentVersion
+
+    -- Create USD Accounts for Banks and Companies
+
+    return ()
