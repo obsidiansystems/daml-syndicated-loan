@@ -145,7 +145,6 @@ origination : LedgerParties -> PreOriginationStuff -> Script (ContractId Pending
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 5.0 -- TODO: Huh
-      durationInYears = 10
       loanApplication = LoanApplication with
         borrower = borrower_alice
         agent = agent_charlie
