@@ -30,8 +30,8 @@ import Scripts.Settlement (SettlementState(..), runSettlement)
 -- 4. lifecycles the distribution event
 -- 5. processes the lifecycle effect
 -- 6. settles the distribution
-runLifecycling : Script()
-runLifecycling = do
+runLifecycling : () -> Script()
+runLifecycling () = do
 
   -- Execute the `runSettlement` script. Bob now holds 10 tokens in his account.
   SettlementState{alice
@@ -41,11 +41,12 @@ runLifecycling = do
     , aliceAccount
     , bobAccount
     , usdInstrument
-    , tokenInstrument
-    , routeProviderCid
-    , settlementFactoryCid
-    , aliceHoldingCid
     , bobHoldingCid} <- runSettlement
+
+  let tokenInstrument = undefined
+      routeProviderCid = undefined
+      settlementFactoryCid = undefined
+      aliceHoldingCid = undefined
 
   -- The bank creates a new version of the token instrument (the "ex-distribution" version). This is
   -- the version Bob will hold after claiming the effect further down below.
@@ -56,7 +57,7 @@ runLifecycling = do
     createCmd Instrument with
       depository = bank
       issuer = bank
-      id = tokenInstrument.id
+      id = undefined
       version = "1"
       description = "Instrument representing units of a generic token"
       validAsOf = now
