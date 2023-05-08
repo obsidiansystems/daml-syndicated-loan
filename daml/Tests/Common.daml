@@ -6,8 +6,7 @@ module Tests.Common where
   against a live non-stateless ledger
 -}
 
-import DA.Map (empty, fromList)
-import DA.Set (singleton)
+import DA.Map (empty)
 import Daml.Script
 import Daml.Finance.Interface.Types.Common.Types
 import Workflow.CreateAccount qualified as CreateAccount
