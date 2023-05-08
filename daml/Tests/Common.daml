@@ -139,10 +139,10 @@ type Rate = Decimal
 makeUnderwritingResult : ContractId UnderwritingRequest -> Commands (ContractId UnderwritingResult)
 makeUnderwritingResult = undefined
 
-makeFundingRequest : ContractId UnderwritingResult -> Party -> Commands (ContractId FundingRequest)
+makeFundingRequest : ContractId UnderwritingResult -> Party -> Commands (ContractId LoanRequest)
 makeFundingRequest = undefined
 
-getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
+getFundingRequestsFor : Party -> Script [(ContractId LoanRequest, LoanRequest)]
 getFundingRequestsFor = undefined
 
 makeLoanApplication : Amount -> Commands (ContractId LoanApplication)
@@ -151,19 +151,19 @@ makeLoanApplication = undefined
 makeUnderwritingRequest : Commands (ContractId UnderwritingRequest)
 makeUnderwritingRequest = undefined
 
-selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (Rate, [(ContractId FundingInterest, Amount)])
+selectFundingInterests : [(ContractId LoanOffer, LoanOffer)] -> Script (Rate, [(ContractId LoanOffer, Amount)])
 selectFundingInterests = undefined
 
-createFinalLoan : ContractId AcceptedLoan -> [(ContractId FundingInterest, Amount)] -> Commands (ContractId LoanAgreement)
+createFinalLoan : ContractId AcceptedLoan -> [(ContractId LoanOffer, Amount)] -> Commands (ContractId LoanAgreement)
 createFinalLoan = undefined
 
-createLoanProposal : Party -> Amount -> Rate -> Commands (ContractId LoanProposal)
+createLoanProposal : Party -> Amount -> Rate -> Commands (ContractId SyndicatedLoanOffer)
 createLoanProposal = undefined
 
-acceptLoanProposal : ContractId LoanProposal -> Commands (ContractId AcceptedLoan)
+acceptLoanProposal : ContractId SyndicatedLoanOffer -> Commands (ContractId AcceptedLoan)
 acceptLoanProposal = undefined
 
-makeFundingInterest : ContractId FundingRequest -> FundingRequest -> [(Amount, Rate)] -> Commands (ContractId FundingInterest)
+makeFundingInterest : ContractId LoanRequest -> LoanRequest -> [(Amount, Rate)] -> Commands (ContractId LoanOffer)
 makeFundingInterest = undefined
 
 servicing : LedgerParties -> ContractId LoanAgreement -> Script ()

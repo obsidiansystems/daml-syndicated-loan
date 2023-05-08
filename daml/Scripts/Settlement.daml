@@ -6,7 +6,8 @@ import Daml.Script
 
 -- INTERFACE DEPENDENCIES --
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
-import Daml.Finance.Interface.Instrument.Base.Instrument qualified as Instrument (I)
+import Daml.Finance.Interface.Instrument.Base.Instrument qualified as Instrument
+import Daml.Finance.Interface.Util.Disclosure qualified as Disclosure
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
 import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (Allocate(..), Approve(..))
@@ -16,7 +17,9 @@ import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), Instrument
 import Daml.Finance.Interface.Util.Common (qty)
 
 -- IMPLEMENTATION DEPENDENCIES --
-import Daml.Finance.Instrument.Token.Instrument (Instrument(..))
+import Daml.Finance.Instrument.Bond.FixedRate.Instrument qualified as FR
+-- import Daml.Finance.Interface.Instrument.Bond.FixedRate.Instrument qualified as FR
+import Daml.Finance.Interface.Instrument.Bond.FixedRate.Instrument (Instrument(..))
 import Daml.Finance.Settlement.Factory (Factory(..))
 import Daml.Finance.Settlement.RouteProvider.SingleCustodian (SingleCustodian(..))
 
@@ -24,6 +27,20 @@ import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.DvP qualified as DvP
 
 import Scripts.Transfer (TransferState(..), runTransfer)
+
+import DA.Date (DayOfWeek(..), Month(..), addDays, date, subtractDays)
+import DA.Map qualified as M (fromList)
+import DA.Set qualified as S (singleton)
+import Daml.Finance.Data.Reference.HolidayCalendar (HolidayCalendar(..))
+import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
+import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(..))
+import Daml.Finance.Interface.Types.Date.RollConvention (Period(..), PeriodEnum(..), RollConventionEnum(..))
+import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
+import Daml.Finance.Interface.Util.Common (qty)
+import DA.Date (toGregorian)
+import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..))
+import Daml.Finance.Data.Time.DateClock.Types qualified as DateClock
+import Daml.Finance.Interface.Types.Date.Classes
 
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
@@ -35,12 +52,46 @@ data SettlementState = SettlementState
     aliceAccount : AccountKey
     bobAccount : AccountKey
     usdInstrument : InstrumentKey
-    tokenInstrument : InstrumentKey
+    bondInstrument : InstrumentKey
     routeProviderCid : ContractId RouteProvider.I
     settlementFactoryCid : ContractId Settlement.F
     aliceHoldingCid : ContractId Holding.I
     bobHoldingCid : ContractId Holding.I
   deriving (Eq, Show)
+
+-- | Create a schedule for periodic payments.
+createPaymentPeriodicSchedule : Date -> [Text] -> Cal.BusinessDayConventionEnum -> PeriodEnum ->
+  Int -> Date -> Date -> PeriodicSchedule
+createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConvention couponPeriod
+  couponPeriodMultiplier issueDate maturityDate = do
+    -- CREATE_PERIODIC_SCHEDULE_BEGIN
+    let
+      (y, m, d) = toGregorian firstCouponDate
+      periodicSchedule = PeriodicSchedule with
+        businessDayAdjustment =
+          Cal.BusinessDayAdjustment with
+            calendarIds = holidayCalendarIds
+            convention = businessDayConvention
+        effectiveDateBusinessDayAdjustment = None
+        terminationDateBusinessDayAdjustment = None
+        frequency =
+          Sched.Periodic Sched.Frequency with
+            rollConvention = DOM d
+            period = Period with
+              period = couponPeriod
+              periodMultiplier = couponPeriodMultiplier
+        effectiveDate = issueDate
+        firstRegularPeriodStartDate = Some firstCouponDate
+        lastRegularPeriodEndDate = Some maturityDate
+        stubPeriodType = None
+        terminationDate = maturityDate
+    -- CREATE_PERIODIC_SCHEDULE_END
+    periodicSchedule
+
+run : Script ()
+run = do
+  settlement <- runSettlement
+  return ()
 
 -- | Test script that
 -- 1. executes the `runTransfer` script
@@ -61,11 +112,11 @@ runSettlement = do
     , holdingFactoryCid
     , newHoldingCid = bobHoldingCid} <- runTransfer
 
-  -- Bank creates a token instrument
+  -- Bank creates a bond instrument
   let
-    instrumentId = Id "TOKEN"
+    instrumentId = Id "BOND"
     instrumentVersion = "0"
-    tokenInstrument = InstrumentKey with
+    bondInstrument = InstrumentKey with
       issuer = bank
       depository = bank
       id = instrumentId
@@ -73,21 +124,40 @@ runSettlement = do
 
   now <- getTime
 
-  tokenInstrumentCid <- toInterfaceContractId @Instrument.I <$> submit bank do
-    createCmd Instrument with
+  let businessDayConvention = Cal.Following
+      periodicSchedule = createPaymentPeriodicSchedule
+        (date 2023 Apr 10)
+        []
+        businessDayConvention
+        M
+        1
+        (date 2023 Apr 10)
+        (date 2028 Apr 10)
+
+
+  bondInstrumentCid <- toInterfaceContractId @Instrument.I <$> submit bank do
+    createCmd FR.Instrument with
       depository = bank
       issuer = bank
       id = instrumentId
       version = instrumentVersion
-      description = "Instrument representing units of a generic token"
-      validAsOf = now
+      description = "Instrument representing a bond"
       observers = empty
+      couponRate = 0.005
+      periodicSchedule
+      holidayCalendarIds = []
+      calendarDataProvider = bank
+      dayCountConvention = Act365Fixed
+      currency = usdInstrument
+      lastEventTimestamp = toUTCTime (DateClock.Unit (date 2028 Apr 10))
+
+
 
   -- Credit Alice's account with a token holding
   aliceRequestCid <- submit alice do
     createCmd CreditAccount.Request with
       account = aliceAccount
-      instrument = tokenInstrument
+      instrument = bondInstrument
       amount = 10.0
   aliceHoldingCid <- submit bank do exerciseCmd aliceRequestCid CreditAccount.Accept
 
@@ -113,7 +183,7 @@ runSettlement = do
   dvpProposalCid <- submit bob do
     createCmd DvP.Proposal with
       id = "xccy trade"
-      recQuantity = qty 10.0 tokenInstrument
+      recQuantity = qty 10.0 bondInstrument
       payQuantity = qty 1000.0 usdInstrument
       proposer = bob
       counterparty = alice
@@ -167,7 +237,7 @@ runSettlement = do
     aliceAccount
     bobAccount
     usdInstrument
-    tokenInstrument
+    bondInstrument
     routeProviderCid
     settlementFactoryCid
     aliceHoldingCid = toInterfaceContractId aliceHoldingCid
