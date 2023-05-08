@@ -58,7 +58,7 @@ template UnderwritingResult
   where
     signatory underwriter
     observer agent
-    key (agent, uuid) : (Party, Text)
+    key (underwriter, agent, uuid) : (Party, Party, Text)
     maintainer key._1
 
     nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
@@ -91,7 +91,7 @@ template LoanRequest
   where
     signatory agent
     observer participant
-    key (agent, uuid) : (Party, Text)
+    key (agent, participant, uuid) : (Party, Party, Text)
     maintainer key._1
 
 -- | An offer by a participant to loan part (or all of) of the amount specified by the LoanApplication
@@ -106,7 +106,7 @@ template LoanOffer
   where
     signatory participant
     observer agent
-    key (agent, uuid) : (Party, Text)
+    key (participant, agent, uuid) : (Party, Party, Text)
     maintainer key._1
 
 template SyndicatedLoanOffer
@@ -115,7 +115,7 @@ template SyndicatedLoanOffer
     uuid : Text
     borrower : Party
     amount : Numeric 2
-    rate : Decimal
+    rate : RatePerAnnum
     -- other terms: term, fees, covenants, etc.
     --NOTE: Maybe a covenant, once agreed by the borrower, could actually grant access to some on-chain data in the future, which is necessary to enforce it. and this could also trigger on-chain modifications of the loan.
   where
@@ -138,7 +138,7 @@ template AcceptedLoan
     agent : Party
     borrower : Party
     amount : Numeric 2
-    rate : Decimal
+    rate : RatePerAnnum
   where
     signatory borrower
     observer agent
@@ -154,6 +154,15 @@ template LoanAgreement
     loanTerms : LoanTerms
   where
     signatory agent, borrower, Map.keys participantsWithAmount
+
+template PendingLoanAgreement
+  with
+    agreement : LoanAgreement
+    signed : [Party]
+  where
+    -- TODO: ensure clause
+    signatory agreement.agent, signed
+    observer Map.keys agreement.participantsWithAmount
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 

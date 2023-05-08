@@ -7,6 +7,7 @@ module Tests.Common where
 -}
 
 import DA.Map (empty)
+import qualified DA.Map as Map
 import Daml.Script
 import Daml.Finance.Interface.Types.Common.Types
 import Workflow.CreateAccount qualified as CreateAccount
@@ -139,28 +140,36 @@ preOrigination LedgerParties{..} = do
     return $ PreOriginationStuff with
       aliceAccount
 
-origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgreement)
+origination : LedgerParties -> PreOriginationStuff -> Script (ContractId PendingLoanAgreement)
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
-  application <- submit borrower_alice $ makeLoanApplication amount
-  underwritingRequest <- submit agent_charlie makeUnderwritingRequest
+      rate = RatePerAnnum 5.0 -- TODO: Huh
+      durationInYears = 10
+      loanApplication = LoanApplication with
+        borrower = borrower_alice
+        agent = agent_charlie
+        duration = durationInYears
+        amount
+        maxInterestRate = rate
+        prospectus = "To test the syndicated loans framework :)"
+  application <- submit borrower_alice $ createCmd loanApplication
+  underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma loanApplication)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
   let possibleLenders = [lender_gary, lender_hortense]
   forA_ possibleLenders $ \lender -> do
     makeFundingRequest agent_charlie amount underwritingResult lender
   fundingInterestCids <- forA possibleLenders $ \lender -> do
     [(fundingRequestCid, fundingRequest)] <- getFundingRequestsFor lender
-    submit lender $ makeFundingInterest fundingRequestCid fundingRequest [(10_000_000.00, 5.0)]
+    submit lender $ makeFundingInterest lender fundingRequestCid fundingRequest (amount, rate)
   fundingInterests <- forA fundingInterestCids $ \cid -> do
     Some fundingInterest <- queryContractId agent_charlie cid
     pure (cid, fundingInterest)
   (rate, selectedFundingInterests) <- selectFundingInterests fundingInterests
-  loanProposal <- submit agent_charlie $ createLoanProposal borrower_alice amount rate
-  acceptedLoan <- submit borrower_alice $ acceptLoanProposal loanProposal
-  submit agent_charlie $ createFinalLoan acceptedLoan selectedFundingInterests
+  loanProposal <- submit agent_charlie $ createLoanProposal agent_charlie borrower_alice amount rate
+  acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
+  createPendingLoanAgreement agent_charlie acceptedLoan selectedFundingInterests
 
 type Amount = Numeric 2
-type Rate = Decimal
 
 makeUnderwritingResult
     : Party
@@ -192,29 +201,65 @@ makeFundingRequest agent amount underwriteCid lender = do
         totalApplicationAmount = amount
 
 getFundingRequestsFor : Party -> Script [(ContractId LoanRequest, LoanRequest)]
-getFundingRequestsFor = undefined
+getFundingRequestsFor lender = query @LoanRequest lender
 
-makeLoanApplication : Amount -> Commands (ContractId LoanApplication)
-makeLoanApplication = undefined
+makeFundingInterest : Party -> ContractId LoanRequest -> LoanRequest -> (Amount, RatePerAnnum) -> Commands (ContractId LoanOffer)
+makeFundingInterest lender _ loanRequest (amount, rate) = createCmd LoanOffer with
+    agent = loanRequest.agent
+    uuid = "golden" -- TODO: Thread these through
+    participant = lender
+    amount
+    rate
 
-makeUnderwritingRequest : Commands (ContractId UnderwritingRequest)
-makeUnderwritingRequest = undefined
+makeUnderwritingRequest : Party -> LoanApplication -> Commands (ContractId UnderwritingRequest)
+makeUnderwritingRequest underwriter loanApplication = createCmd UnderwritingRequest with
+  underwriter
+  uuid = "golden" -- TODO: Thread these through
+  loan = loanApplication
 
-selectFundingInterests : [(ContractId LoanOffer, LoanOffer)] -> Script (Rate, [(ContractId LoanOffer, Amount)])
-selectFundingInterests = undefined
+selectFundingInterests : [(ContractId LoanOffer, LoanOffer)] -> Script (RatePerAnnum, [(ContractId LoanOffer, Amount)])
+selectFundingInterests ((offerCid, offer)::interests) = pure (offer.rate, [(offerCid, offer.amount)])
+selectFundingInterests [] = fail "No interests to fund loan"
 
-createFinalLoan : ContractId AcceptedLoan -> [(ContractId LoanOffer, Amount)] -> Commands (ContractId LoanAgreement)
-createFinalLoan = undefined
+createPendingLoanAgreement : Party -> ContractId AcceptedLoan -> [(ContractId LoanOffer, Amount)] -> Script (ContractId PendingLoanAgreement)
+createPendingLoanAgreement agent acceptanceCid fundingCids = do
+  Some acceptance <- queryContractId agent acceptanceCid
+  lendersWithAmounts <- forA fundingCids $ \(offerCid, amount) -> do
+    Some loanOffer <- queryContractId agent offerCid
+    pure (loanOffer.participant, amount)
+  let agreement = LoanAgreement with
+        agent
+        participantsWithAmount = Map.fromList lendersWithAmounts
+        borrower = acceptance.borrower
+        uuid = "golden" -- TODO: Thread these through
+        prospectus = "uhhh" -- TODO: Get this
+        loanTerms = LoanTerms with
+          amount = acceptance.amount
+          rate = acceptance.rate
+          duration = 10 -- TODO: Get this
 
-createLoanProposal : Party -> Amount -> Rate -> Commands (ContractId SyndicatedLoanOffer)
-createLoanProposal = undefined
+  submit agent $ createCmd PendingLoanAgreement with
+    agreement
+    signed = []
 
-acceptLoanProposal : ContractId SyndicatedLoanOffer -> Commands (ContractId AcceptedLoan)
-acceptLoanProposal = undefined
+createLoanProposal : Party -> Party -> Amount -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
+createLoanProposal agent borrower amount rate = createCmd SyndicatedLoanOffer with
+  agent
+  borrower
+  uuid = "golden" -- TODO: Thread these through
+  amount
+  rate
 
-makeFundingInterest : ContractId LoanRequest -> LoanRequest -> [(Amount, Rate)] -> Commands (ContractId LoanOffer)
-makeFundingInterest = undefined
+acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoan)
+acceptLoanProposal borrower offerCid = do
+  Some offer <- queryContractId borrower offerCid
+  submit borrower $ createCmd AcceptedLoan with
+    agent = offer.agent
+    borrower
+    amount = offer.amount
+    rate = offer.rate
 
-servicing : LedgerParties -> ContractId LoanAgreement -> Script ()
+-- TODO: This will take a LoanAgreement once we have multi-party signing implemented
+servicing : LedgerParties -> ContractId PendingLoanAgreement -> Script ()
 servicing LedgerParties{..} loan = do
   pure ()
