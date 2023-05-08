@@ -1,4 +1,4 @@
-module Common where
+module Tests.Common where
 
 import Daml.Script
 import Daml.Finance.Interface.Types.Common.Types
