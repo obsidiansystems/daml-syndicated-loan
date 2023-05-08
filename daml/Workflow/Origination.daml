@@ -135,10 +135,10 @@ template LoanAgreement
 -- NOTE: pays to agent for now. TODO: pay to participants
 loanAgreementToBond
   :  Time -- Current time
-  -> Party -- the Fed (the issuer and depository of USD)
+  -> InstrumentKey -- USD
   -> LoanAgreement
   -> Bond
-loanAgreementToBond now fed a =
+loanAgreementToBond now usd a =
   Instrument with
     depository = a.agent -- same as agent for now
     issuer = a.borrower
@@ -154,12 +154,6 @@ loanAgreementToBond now fed a =
     observers = Map.fromList $ zip (map show [1..]) (map Set.singleton a.participants)
     lastEventTimestamp = now
   where
-    usd = InstrumentKey with -- TODO: take this as argument?
-      depository = fed
-      issuer = fed
-      id = Id "USD"
-      version = "0"
-
     startDate = toDateUTC now
 
     schedule = PeriodicSchedule with
