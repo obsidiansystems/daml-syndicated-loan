@@ -4,6 +4,8 @@ This is application has been built by [Obsidian Systems](https://obsidian.system
 
 A syndicated loan is a loan that is issued by multiple parties, called participants, via an intermediary, called an agent or arranger, to a borrower. Within that basic structure there are many, many possible variations.
 
+![Syndicated Loan Summary](./doc/syndicated-loan-summary.png)
+
 ## Parties
 
 A basic syndicated loan involves the following primary parties:
