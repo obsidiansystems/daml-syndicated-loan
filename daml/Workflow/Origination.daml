@@ -61,11 +61,29 @@ template UnderwritingResult
     key (agent, uuid) : (Party, Text)
     maintainer key._1
 
+    nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
+      with
+        disclose_to : Party
+      controller agent 
+      do
+        create UnderwritingDisclosure with
+          underwriting = this
+          participant = disclose_to
+
+template UnderwritingDisclosure
+  with
+    underwriting : UnderwritingResult
+    participant : Party
+  where
+    signatory underwriting.underwriter, underwriting.agent
+    observer participant
+
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
 template LoanRequest
   with
     agent : Party
     uuid : Text
+    underwrite : ContractId UnderwritingDisclosure
     totalApplicationAmount : Numeric 2
     -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
     participant : Party

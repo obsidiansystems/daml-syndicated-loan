@@ -144,10 +144,10 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
   application <- submit borrower_alice $ makeLoanApplication amount
   underwritingRequest <- submit agent_charlie makeUnderwritingRequest
-  underwritingResult <- submit underwriter_emma $ makeUnderwritingResult underwritingRequest
+  underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
   let possibleLenders = [lender_gary, lender_hortense]
   forA_ possibleLenders $ \lender -> do
-    submit agent_charlie $ makeFundingRequest underwritingResult lender
+    makeFundingRequest agent_charlie amount underwritingResult lender
   fundingInterestCids <- forA possibleLenders $ \lender -> do
     [(fundingRequestCid, fundingRequest)] <- getFundingRequestsFor lender
     submit lender $ makeFundingInterest fundingRequestCid fundingRequest [(10_000_000.00, 5.0)]
@@ -162,11 +162,34 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
 type Amount = Numeric 2
 type Rate = Decimal
 
-makeUnderwritingResult : ContractId UnderwritingRequest -> Commands (ContractId UnderwritingResult)
-makeUnderwritingResult = undefined
+makeUnderwritingResult
+    : Party
+    -> ContractId UnderwritingRequest 
+    -> Script (ContractId UnderwritingResult)
+makeUnderwritingResult underwriter requestCid = do
+    Some request <- queryContractId underwriter requestCid
+    submit underwriter $ createCmd UnderwritingResult with
+        underwriter
+        agent = request.loan.agent
+        result = True
+        uuid = "golden"
 
-makeFundingRequest : ContractId UnderwritingResult -> Party -> Commands (ContractId LoanRequest)
-makeFundingRequest = undefined
+makeFundingRequest
+    : Party
+    -> Numeric 2
+    -> ContractId UnderwritingResult
+    -> Party
+    -> Script (ContractId LoanRequest)
+makeFundingRequest agent amount underwriteCid lender = do
+    Some underwrite <- queryContractId agent underwriteCid
+    disclosedUnderwriting <- submit agent $ exerciseCmd underwriteCid UnderwritingResult_Disclose with
+        disclose_to = lender
+    submit agent $ createCmd LoanRequest with
+        agent
+        uuid = "golden" -- TODO: Thread these through
+        underwrite = disclosedUnderwriting
+        participant = lender
+        totalApplicationAmount = amount
 
 getFundingRequestsFor : Party -> Script [(ContractId LoanRequest, LoanRequest)]
 getFundingRequestsFor = undefined
