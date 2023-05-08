@@ -307,7 +307,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
 
-type Amount = Numeric 2
+type Amount = Decimal
 
 makeUnderwritingResult
     : Party
@@ -319,7 +319,7 @@ makeUnderwritingResult underwriter requestCid = do
 
 makeFundingRequest
     : Party
-    -> Numeric 2
+    -> Decimal
     -> ContractId UnderwritingResult
     -> Party
     -> Script (ContractId FundingRequest)
@@ -338,7 +338,7 @@ getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequ
 getFundingRequestsFor lender = query @FundingRequest lender
 
 -- TODO: Actually make a decision about amount and rate
-makeFundingInterest : Party -> ContractId FundingRequest -> (Amount, RatePerAnnum) -> Commands (ContractId FundingInterest)
+makeFundingInterest : Party -> ContractId FundingRequest -> (Decimal, RatePerAnnum) -> Commands (ContractId FundingInterest)
 makeFundingInterest lender requestCid (amount, rate) = exerciseCmd requestCid FundingRequest_Respond with
     amount
     rate
@@ -430,20 +430,20 @@ template SettlementProposal
     settlementFactoryCid : ContractId Settlement.F
   where
     signatory loan.agent
-    observer loan.borrower::(map fst $ Map.toList loan.participantsWithTerms)
+    observer loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
     choice Accept_Borrower : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
       controller loan.borrower
       do
-        let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithTerms)
+        let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         if sigAccumulator == lendersAndBorrowers then do
           -- TODO: DRY
           -- Settlement of lenders
-          let lenderSteps = (Map.toList loan.participantsWithTerms) <&> \(lender, investAmount) ->
-                Step with sender = lender; receiver = loan.agent; quantity = investAmount
+          let lenderSteps = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
+                Step with sender = lender; receiver = loan.agent; quantity = Quantity loan.loanTerms.instrument investAmount
           -- Settlement of borrower
               borrowerStep =
-                Step with sender = loan.agent; receiver = loan.borrower; quantity = loan.loanTerms.amount
+                Step with sender = loan.agent; receiver = loan.borrower; quantity = Quantity loan.loanTerms.instrument loan.loanTerms.amount
 
           -- Discover settlement routes for the steps
           routedSteps <- exercise routeProviderCid RouteProvider.Discover with
@@ -470,18 +470,18 @@ template SettlementProposal
     choice Accept_Lender : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
       with
         currLender : Party
-      controller (map fst $ Map.toList loan.participantsWithAmount)
+      controller (map fst $ Map.toList loan.participantsWithAmounts)
       do
-        let lendersAndBorrowers : [Party] = loan.borrower::(map fst $ Map.toList loan.participantsWithAmount)
+        let lendersAndBorrowers : [Party] = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
-        if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmount) then do
+        if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts) then do
           -- TODO: DRY
           -- Settlement of lenders
-          let lenderSteps = Map.toList loan.participantsWithAmount <&> \(lender, investAmount) ->
-                Step with sender = lender; receiver = loan.agent; quantity = investAmount
+          let lenderSteps = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
+                Step with sender = lender; receiver = loan.agent; quantity = Quantity loan.loanTerms.instrument investAmount
           -- Settlement of borrower
               borrowerStep =
-                Step with sender = loan.agent; receiver = loan.borrower; quantity = loan.loanTerms.amount
+                Step with sender = loan.agent; receiver = loan.borrower; quantity = Quantity loan.loanTerms.instrument loan.loanTerms.amount
 
           -- Discover settlement routes for the steps
           routedSteps <- exercise routeProviderCid RouteProvider.Discover with
