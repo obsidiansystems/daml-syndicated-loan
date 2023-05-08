@@ -7,6 +7,7 @@ module Tests.Common where
 -}
 
 import DA.Action
+import DA.Functor
 import DA.Map (empty)
 import qualified DA.Map as Map
 import Daml.Script
@@ -440,7 +441,7 @@ template SettlementProposal
         if sigAccumulator == lendersAndBorrowers then do
           -- TODO: DRY
           -- Settlement of lenders
-          let lenderSteps = fmap loan.participantsWithTerms $ \(lender, investAmount) ->
+          let lenderSteps = (Map.toList loan.participantsWithTerms) <&> \(lender, investAmount) ->
                 Step with sender = lender; receiver = loan.agent; quantity = investAmount
           -- Settlement of borrower
               borrowerStep =
@@ -448,14 +449,14 @@ template SettlementProposal
 
           -- Discover settlement routes for the steps
           routedSteps <- exercise routeProviderCid RouteProvider.Discover with
-            discoverors = Map.fromList $ loan.agent::lendersAndBorrowers
+            discoverors = S.fromList $ loan.agent::lendersAndBorrowers
             contextId = None
             steps = borrowerStep::lenderSteps
 
           -- Instruct settlement
           (containerCid, [recInstructionCid, payInstructionCid]) <-
             exercise settlementFactoryCid Settlement.Instruct with
-              instructors = Map.fromList $ loan.agent::lendersAndBorrowers
+              instructors = S.fromList $ loan.agent::lendersAndBorrowers
               settlers = singleton loan.agent
               id = Id id
               description = "Settlement for " <> id
@@ -469,13 +470,16 @@ template SettlementProposal
           create this with sigAccumulator = loan.borrower::sigAccumulator
           return None
     choice Accept_Lender : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
+      with
+        currLender : Party
       controller (map fst $ Map.toList loan.participantsWithAmount)
       do
         let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmount)
+            id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmount) then do
           -- TODO: DRY
           -- Settlement of lenders
-          let lenderSteps = fmap loan.participantsWithAmount $ \(lender, investAmount) ->
+          let lenderSteps = Map.toList loan.participantsWithAmount <&> \(lender, investAmount) ->
                 Step with sender = lender; receiver = loan.agent; quantity = investAmount
           -- Settlement of borrower
               borrowerStep =
@@ -502,7 +506,7 @@ template SettlementProposal
 
         -- add the current choice controller to the list of acquired signatures
         else do
-          create this with sigAccumulator = choiceController::sigAccumulator
+          create this with sigAccumulator = currLender::sigAccumulator
           return None
 
     choice Decline : ()
