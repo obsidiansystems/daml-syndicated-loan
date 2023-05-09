@@ -8,19 +8,24 @@ module Tests.Common where
 
 import DA.Action
 import DA.List
+import DA.Foldable
 import DA.Map (empty)
 import qualified DA.Map as Map
-import Daml.Script
-import Daml.Finance.Interface.Types.Common.Types
-import Workflow.CreateAccount qualified as CreateAccount
-import Workflow.CreditAccount qualified as CreditAccount
-import Workflow.Transfer qualified as Transfer
-import Daml.Finance.Interface.Account.Factory qualified as Account (F)
-import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import qualified DA.Set as S
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
-import DA.Foldable
-
+import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import Daml.Finance.Interface.Types.Common.Types
+import Daml.Finance.Settlement.Factory (Factory(..))
+import Daml.Script
+import qualified Daml.Finance.Holding.Fungible as FungibleX
+import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
+import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
+import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
+import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as SingleCustodian
+import Workflow.CreateAccount qualified as CreateAccount
+import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 import Daml.Finance.Interface.Holding.Transferable (Transfer)
 import qualified Daml.Finance.Holding.Fungible as FungibleX
@@ -28,6 +33,9 @@ import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
 import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
 import Daml.Finance.Interface.Holding.Fungible (Fungible, Fungible, SplitResult(SplitResult))
 import qualified Daml.Finance.Interface.Holding.Base as B
+import Workflow.SettlementProposal
+import Workflow.Transfer qualified as Transfer
+import Workflow.Util
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -112,8 +120,8 @@ perfTest LedgerParties{..} = do
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
   stuff <- preOrigination parties
-  loan <- origination parties stuff
-  servicing parties loan
+  originationData <- origination parties stuff
+  servicing parties originationData
 
 data PreOriginationStuff = PreOriginationStuff with
   usdInstrument : InstrumentKey
@@ -229,7 +237,7 @@ preOrigination LedgerParties{..} = do
     debbieRequestCid <- submit agent_debbie do
       createCmd CreateAccount.Request with owner = agent_debbie; custodian = fed_ingrid
     debbieAccount <- submit fed_ingrid do
-      exerciseCmd charlieRequestCid CreateAccount.Accept with
+      exerciseCmd debbieRequestCid CreateAccount.Accept with
         label = "Debbie@Bank"
         description = "Account of Debbie at Bank"
         accountFactoryCid = accountFactoryCid
@@ -241,14 +249,23 @@ preOrigination LedgerParties{..} = do
       usdInstrument
       ledgerAccounts
 
-origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgreement)
+data Origination = Origination with
+  loanAgreement : LoanAgreement
+  loanAgreementCid : ContractId LoanAgreement
+  bond : Bond
+  bondRef : InstrumentKey
+  bondCid : ContractId (BaseInstrument.I)
+  amount : Decimal
+
+origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
-      rate = RatePerAnnum 5.0 -- TODO: Huh
+      rate = RatePerAnnum 0.05 -- 5% per annum
       uuid = "golden"
       loanApplication = LoanApplication with
         borrower = borrower_alice
         agent = agent_charlie
+        instrument = usdInstrument
         amount
         maxInterestRate = rate
         prospectus = "To test the syndicated loans framework :)"
@@ -272,7 +289,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     pure (cid, fundingInterest)
   -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
   (rate, selectedFundingInterests) <- selectFundingInterests fundingInterests
-  loanProposal <- submit agent_charlie $ createLoanProposal agent_charlie borrower_alice amount rate
+  loanProposal <- submit agent_charlie $ createLoanProposal application uuid rate
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
@@ -285,9 +302,20 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     borrowerSigned
     selectedFundingInterests
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
-  submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+  loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+  Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
+  now <- getTime
+  let (bond, amount) = loanAgreementToBondAndAmount now undefined loanAgreement
+  (bondRef,bondCid) <- createBond bond
+  return Origination with
+    loanAgreement
+    loanAgreementCid
+    bond
+    bondRef
+    bondCid
+    amount
 
-type Amount = Numeric 2
+type Amount = Decimal
 
 makeUnderwritingResult
     : Party
@@ -299,7 +327,7 @@ makeUnderwritingResult underwriter requestCid = do
 
 makeFundingRequest
     : Party
-    -> Numeric 2
+    -> Decimal
     -> ContractId UnderwritingResult
     -> Party
     -> Script (ContractId FundingRequest)
@@ -318,7 +346,7 @@ getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequ
 getFundingRequestsFor lender = query @FundingRequest lender
 
 -- TODO: Actually make a decision about amount and rate
-makeFundingInterest : Party -> ContractId FundingRequest -> (Amount, RatePerAnnum) -> Commands (ContractId FundingInterest)
+makeFundingInterest : Party -> ContractId FundingRequest -> (Decimal, RatePerAnnum) -> Commands (ContractId FundingInterest)
 makeFundingInterest lender requestCid (amount, rate) = exerciseCmd requestCid FundingRequest_Respond with
     amount
     rate
@@ -346,6 +374,7 @@ createPendingLoanAgreement agent acceptanceCid fundingCids = do
         uuid = "golden" -- TODO: Thread these through
         prospectus = "uhhh" -- TODO: Get this
         loanTerms = LoanTerms with
+          instrument = acceptance.instrument
           amount = acceptance.amount
           rate = acceptance.rate
           durationYears = 10 -- TODO: Get this
@@ -354,12 +383,9 @@ createPendingLoanAgreement agent acceptanceCid fundingCids = do
     agreement
     signed = []
 
-createLoanProposal : Party -> Party -> Amount -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
-createLoanProposal agent borrower amount rate = createCmd SyndicatedLoanOffer with
-  agent
-  borrower
-  uuid = "golden" -- TODO: Thread these through
-  amount
+createLoanProposal : ContractId LoanApplication -> Text -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
+createLoanProposal applicationCid uuid rate = exerciseCmd applicationCid LoanApplication_CreateOffer with
+  uuid
   rate
 
 acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoan)
@@ -367,6 +393,40 @@ acceptLoanProposal borrower offerCid = do
   submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
 -- TODO: This will take a LoanAgreement once we have multi-party signing implemented
-servicing : LedgerParties -> ContractId LoanAgreement -> Script ()
-servicing LedgerParties{..} loan = do
+servicing : LedgerParties -> Origination -> Script ()
+servicing LedgerParties{..} origination = do
+  
   pure ()
+
+settleLoan : LedgerParties -> LoanAgreement -> Script ()
+settleLoan LedgerParties {..} loanAgreement = do
+  -- 1. Create Route Provider
+  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
+      createCmd SingleCustodian.SingleCustodian with
+        provider = fed_ingrid
+        observers = S.fromList [borrower_alice, borrower_bob]
+        custodian = fed_ingrid
+
+  -- 2. Create Settlement Factory
+  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit fed_ingrid do
+    createCmd Factory with
+      provider = fed_ingrid
+      observers = S.fromList [borrower_bob, borrower_alice]
+
+  -- TODO: This is the part where you begin to construct
+  -- 1: All lenders send funds to Agent
+  -- 2: Agent sends funds to borrower
+
+  settlementProposalCid <- submit agent_charlie do
+    createCmd SettlementProposal with
+      loan = loanAgreement
+      sigAccumulator = []
+      routeProviderCid
+      settlementFactoryCid
+
+  -- (batchCid, recSettleInstructionCid, paySettleInstructionCid) <- submit borrower_alice do
+  --   exerciseCmd settlementProposalCid Accept_Borrower
+  settlementRes <- submit borrower_alice do
+    exerciseCmd settlementProposalCid Accept_Borrower
+
+  return ()

@@ -30,6 +30,8 @@ import qualified Daml.Finance.Interface.Lifecycle.Rule.Lifecycle as Lifecycle
 import qualified DA.Map as Map
 import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
 import DA.Time (days, time)
+import Daml.Finance.Interface.Instrument.Base.Instrument (scale)
+import Workflow.Util
 
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
@@ -74,18 +76,11 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
     -- CREATE_PERIODIC_SCHEDULE_END
     periodicSchedule
 
-createReference : ContractId BaseInstrument.I -> Party -> Party -> [(Text, Parties)] ->
-  Script InstrumentKey
-createReference cid depository issuer observers = do
-  instrumentView <- submitMulti [depository, issuer] [] do
-    exerciseCmd cid BaseInstrument.GetView with viewer = issuer
-  let ref = BaseInstrument.Reference with instrumentView; cid; observers = M.fromList observers
-  submitMulti [depository, issuer] [] do createCmd ref
-  pure $ key ref
 
-run : Script ()
-run = do
-  settlement <- runSettlement
+
+run : () -> Script ()
+run () = do
+  runBondStep ()
   return ()
 
 -- | Test script that
@@ -93,9 +88,9 @@ run = do
 -- 2. creates a token instrument
 -- 3. credits a token holding to Alice in her bank account
 -- 4. atomically exchanges the token against the cash holding
-runSettlement : Script SettlementState
-runSettlement = do
 
+runBondStep : () -> Script ()
+runBondStep () = do
   -- Execute the `runTransfer` script. Bob now holds USD 1000 in his account.
   TransferState{alice
     , bank
@@ -145,7 +140,7 @@ runSettlement = do
       currency = usdInstrument
       lastEventTimestamp = toUTCTime (DateClock.Unit (date 2028 Apr 10))
 
-  bondRef <- createReference bondInstrumentCid bank bank []
+  bondRef <- createReference bondInstrumentCid bank bank (Map.empty)
 
   passTime (days 30)
   
@@ -176,13 +171,4 @@ runSettlement = do
     None -> debug "NO NEW STUFF"
     Some b -> debug $ show b
 
-  pure $ SettlementState with
-    alice
-    bank
-    bob
-    public
-    aliceAccount
-    bobAccount
-    usdInstrument
-    bondInstrument
-    bobHoldingCid = toInterfaceContractId bobHoldingCid
+  return ()

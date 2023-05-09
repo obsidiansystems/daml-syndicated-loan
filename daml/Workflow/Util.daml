@@ -1,0 +1,27 @@
+module Workflow.Util where
+
+import Daml.Script
+
+import DA.Map (Map)
+import Daml.Finance.Interface.Instrument.Base.Instrument qualified as Instrument
+import Daml.Finance.Interface.Types.Common.Types (Parties, InstrumentKey(..))
+import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
+
+import Workflow.Origination
+
+createReference : ContractId BaseInstrument.I -> Party -> Party -> Map Text Parties ->
+  Script InstrumentKey
+createReference cid depository issuer observers = do
+  instrumentView <- submitMulti [depository, issuer] [] do
+    exerciseCmd cid BaseInstrument.GetView with viewer = issuer
+  let ref = BaseInstrument.Reference with instrumentView; cid; observers
+  submitMulti [depository, issuer] [] do createCmd ref
+  pure $ key ref
+
+createBond : Bond -> Script (InstrumentKey, ContractId BaseInstrument.I)
+createBond bond = do
+  bondCid <- toInterfaceContractId @BaseInstrument.I <$> submit bond.depository do
+    createCmd bond
+  bondRef <- createReference bondCid bond.depository bond.issuer bond.observers
+  return (bondRef, bondCid)
+  

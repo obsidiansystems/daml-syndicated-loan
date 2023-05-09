@@ -21,3 +21,8 @@ perfTestIDE : Script ()
 perfTestIDE = do
   parties <- createParties
   perfTest parties
+
+goldenTestIDE : Script ()
+goldenTestIDE = do
+  parties <- createParties
+  initialTest parties

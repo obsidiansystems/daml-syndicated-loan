@@ -1,0 +1,113 @@
+module Workflow.SettlementProposal where
+
+import DA.Functor
+import DA.List (sort)
+import qualified DA.Map as Map
+import Daml.Finance.Interface.Types.Common.Types
+
+import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
+import qualified DA.Set as S
+
+import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
+
+import Daml.Finance.Interface.Settlement.Batch qualified as Batch (I)
+import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (I)
+import Daml.Finance.Interface.Settlement.Types (Step(..))
+import DA.Set (singleton)
+
+import Workflow.Origination
+
+template SettlementProposal
+  with
+    loan : LoanAgreement
+    sigAccumulator: [Party] -- Acquire acceptance from all parties
+    routeProviderCid : ContractId RouteProvider.I
+    settlementFactoryCid : ContractId Settlement.F
+  where
+    signatory loan.agent
+    observer loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
+    choice Accept_Borrower : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
+      controller loan.borrower
+      do
+        let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
+            id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
+        if (sort sigAccumulator) == (sort lendersAndBorrowers) then do
+          -- TODO: DRY
+          -- Settlement of lenders
+          let lenderSteps = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
+                Step with sender = lender; receiver = loan.agent; quantity = Quantity loan.loanTerms.instrument investAmount
+          -- Settlement of borrower
+              borrowerStep =
+                Step with sender = loan.agent; receiver = loan.borrower; quantity = Quantity loan.loanTerms.instrument loan.loanTerms.amount
+
+          -- Discover settlement routes for the steps
+          routedSteps <- exercise routeProviderCid RouteProvider.Discover with
+            discoverors = S.fromList $ loan.agent::lendersAndBorrowers
+            contextId = None
+            steps = borrowerStep::lenderSteps
+
+          -- Instruct settlement
+          (containerCid, [recInstructionCid, payInstructionCid]) <-
+            exercise settlementFactoryCid Settlement.Instruct with
+              instructors = S.fromList $ loan.agent::lendersAndBorrowers
+              settlers = singleton loan.agent
+              id = Id id
+              description = "Settlement for " <> id
+              contextId = None
+              routedSteps
+              settlementTime = None -- i.e., immediate settlement
+
+          return $ Some (containerCid, recInstructionCid, payInstructionCid)
+
+        else do
+          create this with sigAccumulator = loan.borrower::sigAccumulator
+          return None
+    choice Accept_Lender : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
+      with
+        currLender : Party
+      controller (map fst $ Map.toList loan.participantsWithAmounts)
+      do
+        let lendersAndBorrowers : [Party] = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
+            id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
+        if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts) then do
+          -- TODO: DRY
+          -- Settlement of lenders
+          let lenderSteps = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
+                Step with sender = lender; receiver = loan.agent; quantity = Quantity loan.loanTerms.instrument investAmount
+          -- Settlement of borrower
+              borrowerStep =
+                Step with sender = loan.agent; receiver = loan.borrower; quantity = Quantity loan.loanTerms.instrument loan.loanTerms.amount
+
+          -- Discover settlement routes for the steps
+          routedSteps <- exercise routeProviderCid RouteProvider.Discover with
+            discoverors = S.fromList $ loan.agent::lendersAndBorrowers
+            contextId = None
+            steps = borrowerStep::lenderSteps
+
+          -- Instruct settlement
+          (containerCid, [recInstructionCid, payInstructionCid]) <-
+            exercise settlementFactoryCid Settlement.Instruct with
+              instructors = S.fromList $ loan.agent::lendersAndBorrowers
+              settlers = singleton loan.agent
+              id = Id id
+              description = "Settlement for " <> id
+              contextId = None
+              routedSteps
+              settlementTime = None -- i.e., immediate settlement
+
+          return $ Some (containerCid, recInstructionCid, payInstructionCid)
+
+        -- add the current choice controller to the list of acquired signatures
+        else do
+          create this with sigAccumulator = currLender::sigAccumulator
+          return None
+
+    choice Decline : ()
+      -- ^ Decline the request.
+      controller loan.borrower -- TODO: Lenders should be allowed to decline
+      do pure ()
+
+    choice Withdraw : ()
+      -- ^ Withdraw the request.
+      controller loan.agent
+      do pure ()

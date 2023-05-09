@@ -35,7 +35,8 @@ template LoanApplication
   with
     borrower : Party
     agent : Party
-    amount : Numeric 2
+    instrument : InstrumentKey
+    amount : Decimal
     durationYears : Int  -- ^ Number of years
     maxInterestRate : RatePerAnnum
     prospectus : Text
@@ -57,6 +58,19 @@ template LoanApplication
           uuid
           loan = this
 
+    choice LoanApplication_CreateOffer : ContractId SyndicatedLoanOffer
+      with
+        rate : RatePerAnnum
+        uuid : Text
+      controller agent
+      do
+        create SyndicatedLoanOffer with
+          borrower
+          agent
+          uuid
+          instrument
+          amount
+          rate
 template UnderwritingRequest
   with
     underwriter : Party
@@ -76,6 +90,7 @@ template UnderwritingRequest
         create UnderwritingResult with
           underwriter
           agent = loan.agent
+          instrument = loan.instrument
           amount = loan.amount
           maxInterestRate = loan.maxInterestRate
           uuid
@@ -86,7 +101,8 @@ template UnderwritingResult
     underwriter : Party
     uuid : Text
     agent : Party
-    amount : Numeric 2
+    instrument : InstrumentKey
+    amount : Decimal
     maxInterestRate : RatePerAnnum
     result : Bool
   where
@@ -129,7 +145,7 @@ template FundingRequest
     agent : Party
     uuid : Text
     underwrite : ContractId UnderwritingDisclosure
-    totalApplicationAmount : Numeric 2
+    totalApplicationAmount : Decimal
     -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
     participant : Party
     -- ^ The agent creates one 'FundingRequest' for each participant from whom it wants an offer
@@ -141,7 +157,7 @@ template FundingRequest
 
     choice FundingRequest_Respond : ContractId FundingInterest
       with
-        amount : Numeric 2
+        amount : Decimal
         rate : RatePerAnnum
       controller participant
       do
@@ -152,6 +168,7 @@ template FundingRequest
           agent
           uuid
           participant
+          instrument = disclosed.underwriting.instrument
           amount
           rate
 
@@ -161,7 +178,8 @@ template FundingInterest
     agent : Party
     uuid : Text
     participant : Party
-    amount : Numeric 2
+    instrument : InstrumentKey
+    amount : Decimal
     rate : RatePerAnnum
     -- TODO: for now we just reject offers that are greater than LoanApplication.maxInterestRate, but eventually we'd like to accept all offers that makes it possible for the agent to offer a final loan of less than or equal to LoanApplication.maxInterestRate.
   where
@@ -191,7 +209,8 @@ template SyndicatedLoanOffer
     agent : Party
     uuid : Text
     borrower : Party
-    amount : Numeric 2
+    instrument : InstrumentKey
+    amount : Decimal
     rate : RatePerAnnum
     -- other terms: term, fees, covenants, etc.
     --NOTE: Maybe a covenant, once agreed by the borrower, could actually grant access to some on-chain data in the future, which is necessary to enforce it. and this could also trigger on-chain modifications of the loan.
@@ -206,12 +225,14 @@ template SyndicatedLoanOffer
         create AcceptedLoan with
           agent
           borrower
+          instrument
           amount
           rate
 
 
 data LoanTerms = LoanTerms with
-    amount : Numeric 2 -- Principal. TODO: for now always equal to LoanApplication.amount
+    instrument : InstrumentKey
+    amount : Decimal -- Principal. TODO: for now always equal to LoanApplication.amount
     rate : RatePerAnnum
     -- ^ The interest amount paid by the borrower yearly is (amount * rate).
     -- ^ TODO: for now this is always equal to LoanApplication.maxInterestRate, but we want this to become an amount-weighted average of offered participant rates
@@ -222,8 +243,9 @@ data LoanTerms = LoanTerms with
 template AcceptedLoan
   with
     agent : Party
+    instrument : InstrumentKey
     borrower : Party
-    amount : Numeric 2
+    amount : Decimal
     rate : RatePerAnnum
   where
     signatory borrower
@@ -248,7 +270,7 @@ template AcceptedLoan
 template LoanAgreement
   with
     agent : Party
-    participantsWithAmounts : Map Party (Numeric 2)
+    participantsWithAmounts : Map Party (Decimal)
     borrower : Party
     uuid : Text -- Points to UnderwritingRequest.uuid
     prospectus : Text
@@ -284,7 +306,7 @@ loanAgreementToBondAndAmount
   :  Time -- Current time
   -> InstrumentKey -- USD
   -> LoanAgreement
-  -> (Bond, Numeric 2)
+  -> (Bond, Decimal)
 loanAgreementToBondAndAmount now usd a = (, a.loanTerms.amount)
   Instrument with
     depository = a.agent -- same as agent for now
@@ -299,7 +321,7 @@ loanAgreementToBondAndAmount now usd a = (, a.loanTerms.amount)
     dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
     currency = usd
     observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithAmounts))
-    lastEventTimestamp = error "TODO"
+    lastEventTimestamp = now
   where
     startDate = toDateUTC now
 
