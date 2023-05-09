@@ -7,30 +7,28 @@ module Tests.Common where
 -}
 
 import DA.Action
+import DA.Foldable
 import DA.Map (empty)
 import qualified DA.Map as Map
-import Daml.Script
-import Daml.Finance.Interface.Types.Common.Types
-import Workflow.CreateAccount qualified as CreateAccount
-import Workflow.CreditAccount qualified as CreditAccount
-import Workflow.Transfer qualified as Transfer
-import Daml.Finance.Interface.Account.Factory qualified as Account (F)
-import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import qualified DA.Set as S
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
-import DA.Foldable
-
-import Workflow.Origination
-import Workflow.SettlementProposal
-
+import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import Daml.Finance.Interface.Types.Common.Types
+import Daml.Finance.Settlement.Factory (Factory(..))
+import Daml.Script
+import qualified Daml.Finance.Holding.Fungible as FungibleX
+import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
+import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
 import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
 import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as SingleCustodian
-import qualified DA.Set as S
-
-import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
-import Daml.Finance.Settlement.Factory (Factory(..))
-
-import qualified Daml.Finance.Holding.Fungible as FungibleX
+import Workflow.CreateAccount qualified as CreateAccount
+import Workflow.CreditAccount qualified as CreditAccount
+import Workflow.Origination
+import Workflow.SettlementProposal
+import Workflow.Transfer qualified as Transfer
+import Workflow.Util
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -123,8 +121,8 @@ createAccounts LedgerParties{..} = do
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
   stuff <- preOrigination parties
-  loan <- origination parties stuff
-  servicing parties loan
+  originationData <- origination parties stuff
+  servicing parties originationData
 
 data PreOriginationStuff = PreOriginationStuff with
   usdInstrument : InstrumentKey
@@ -252,7 +250,15 @@ preOrigination LedgerParties{..} = do
       usdInstrument
       ledgerAccounts
 
-origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgreement)
+data Origination = Origination with
+  loanAgreement : LoanAgreement
+  loanAgreementCid : ContractId LoanAgreement
+  bond : Bond
+  bondRef : InstrumentKey
+  bondCid : ContractId (BaseInstrument.I)
+  amount : Decimal
+
+origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
@@ -297,7 +303,18 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     borrowerSigned
     selectedFundingInterests
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
-  submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+  loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+  Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
+  now <- getTime
+  let (bond, amount) = loanAgreementToBondAndAmount now undefined loanAgreement
+  (bondRef,bondCid) <- createBond bond
+  return Origination with
+    loanAgreement
+    loanAgreementCid
+    bond
+    bondRef
+    bondCid
+    amount
 
 type Amount = Decimal
 
@@ -377,8 +394,9 @@ acceptLoanProposal borrower offerCid = do
   submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
 -- TODO: This will take a LoanAgreement once we have multi-party signing implemented
-servicing : LedgerParties -> ContractId LoanAgreement -> Script ()
-servicing LedgerParties{..} loan = do
+servicing : LedgerParties -> Origination -> Script ()
+servicing LedgerParties{..} origination = do
+  
   pure ()
 
 settleLoan : LedgerParties -> LoanAgreement -> Script ()
