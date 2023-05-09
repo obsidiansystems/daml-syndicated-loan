@@ -53,7 +53,7 @@ template SettlementProposal
 
     choice Decline : ()
       -- ^ Decline the request.
-      controller loan.borrower -- TODO: Lenders should be allowed to decline
+      controller loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
       do pure ()
 
     choice Withdraw : ()
@@ -61,7 +61,6 @@ template SettlementProposal
       controller loan.agent
       do pure ()
 
--- settleTransactions :: LoanAgreement -> [Party] -> Text -> RouteProvider -> _
 settleTransactions :
   (HasField "agent" r1 Party
   , HasField "amount" r2 (Numeric 10)
