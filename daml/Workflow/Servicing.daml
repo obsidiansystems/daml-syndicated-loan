@@ -1,4 +1,4 @@
-module Servicing where
+module Workflow.Servicing where
 
 import DA.Set qualified as Set
 import DA.Map qualified as Map

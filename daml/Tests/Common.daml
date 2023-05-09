@@ -116,7 +116,17 @@ initialTest parties = do
   servicing parties loan
 
 data PreOriginationStuff = PreOriginationStuff with
-  aliceAccount : AccountKey
+  usdInstrument : InstrumentKey
+  ledgerAccounts : LedgerAccounts
+
+data LedgerAccounts = LedgerAccounts with
+    aliceAccount : AccountKey
+    bobAccount : AccountKey
+    charlieAccount : AccountKey
+    debbieAccount : AccountKey
+    garyAccount : AccountKey
+    hortenseAccount : AccountKey
+  deriving (Show, Eq, Ord)
 
 -- Pre-origination
 preOrigination : LedgerParties -> Script PreOriginationStuff
@@ -157,11 +167,7 @@ preOrigination LedgerParties{..} = do
     hortenseRequestCid <- submit lender_hortense do
       createCmd CreditAccount.Request with
         account = hortenseAccount
-        instrument = InstrumentKey with
-          issuer = fed_ingrid
-          depository = fed_ingrid
-          id = instrumentId
-          version = instrumentVersion
+        instrument = usdInstrument
         amount = 100_000_000.00
 
     hortenseCashHoldingCid <- submit fed_ingrid do exerciseCmd hortenseRequestCid CreditAccount.Accept
@@ -181,11 +187,7 @@ preOrigination LedgerParties{..} = do
     garyRequestCid <- submit lender_gary do
       createCmd CreditAccount.Request with
         account = garyAccount
-        instrument = InstrumentKey with
-          issuer = fed_ingrid
-          depository = fed_ingrid
-          id = instrumentId
-          version = instrumentVersion
+        instrument = usdInstrument
         amount = 50_000_000.00
 
     garyCashHoldingCid <- submit fed_ingrid do exerciseCmd garyRequestCid CreditAccount.Accept
@@ -211,14 +213,39 @@ preOrigination LedgerParties{..} = do
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
         observers = []
+    
+    -- ...for Charlie's agency
+    charlieRequestCid <- submit agent_charlie do
+      createCmd CreateAccount.Request with owner = agent_charlie; custodian = fed_ingrid
+    charlieAccount <- submit fed_ingrid do
+      exerciseCmd charlieRequestCid CreateAccount.Accept with
+        label = "Charlie@Bank"
+        description = "Account of Charlie at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
 
+    -- ...for Debbie's agency
+    debbieRequestCid <- submit agent_debbie do
+      createCmd CreateAccount.Request with owner = agent_debbie; custodian = fed_ingrid
+    debbieAccount <- submit fed_ingrid do
+      exerciseCmd charlieRequestCid CreateAccount.Accept with
+        label = "Debbie@Bank"
+        description = "Account of Debbie at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
+
+    let ledgerAccounts = LedgerAccounts with ..
     return $ PreOriginationStuff with
-      aliceAccount
+      usdInstrument
+      ledgerAccounts
 
 origination : LedgerParties -> PreOriginationStuff -> Script (ContractId LoanAgreement)
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 5.0 -- TODO: Huh
+      uuid = "golden"
       loanApplication = LoanApplication with
         borrower = borrower_alice
         agent = agent_charlie
@@ -229,7 +256,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplication
   -- Agent coordinating the lending first asks an underwriter for a report
-  underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma loanApplication)
+  underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma uuid application)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
   -- Agent with underwriter's report in hand reaches out to possible lenders
   let possibleLenders = [lender_gary, lender_hortense]
@@ -296,11 +323,10 @@ makeFundingInterest lender requestCid (amount, rate) = exerciseCmd requestCid Fu
     amount
     rate
 
-makeUnderwritingRequest : Party -> LoanApplication -> Commands (ContractId UnderwritingRequest)
-makeUnderwritingRequest underwriter loanApplication = createCmd UnderwritingRequest with
+makeUnderwritingRequest : Party -> Text -> ContractId LoanApplication -> Commands (ContractId UnderwritingRequest)
+makeUnderwritingRequest underwriter uuid applicationCid = exerciseCmd applicationCid LoanApplication_CreateUnderwritingRequest with
   underwriter
-  uuid = "golden" -- TODO: Thread these through
-  loan = loanApplication
+  uuid
 
 -- TODO: combine the list of FundingInterest instead of just taking the first element
 selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (RatePerAnnum, [ContractId FundingInterest])

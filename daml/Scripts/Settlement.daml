@@ -1,44 +1,35 @@
 module Scripts.Settlement where
 
-import DA.Map as M (empty)
-import DA.Set as S (fromList, singleton)
 import Daml.Script
 
 -- INTERFACE DEPENDENCIES --
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
 import Daml.Finance.Interface.Instrument.Base.Instrument qualified as Instrument
-import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
-import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
-import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (Allocate(..), Approve(..))
-import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider (I)
-import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
-import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
-import Daml.Finance.Interface.Util.Common (qty)
+import Daml.Finance.Interface.Types.Common.Types (Parties, AccountKey, Id(..), InstrumentKey(..))
 
 -- IMPLEMENTATION DEPENDENCIES --
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument qualified as FR
 --import Daml.Finance.Interface.Instrument.Bond.FixedRate.Instrument qualified as FR
-import Daml.Finance.Settlement.Factory (Factory(..))
-import Daml.Finance.Settlement.RouteProvider.SingleCustodian (SingleCustodian(..))
-
-import Workflow.CreditAccount qualified as CreditAccount
-import Workflow.DvP qualified as DvP
 
 import Scripts.Transfer (TransferState(..), runTransfer)
 
-import DA.Date (DayOfWeek(..), Month(..), addDays, date, subtractDays)
+import DA.Date (Month(..), date, toGregorian)
 import DA.Map qualified as M (fromList)
-import DA.Set qualified as S (singleton)
-import Daml.Finance.Data.Reference.HolidayCalendar (HolidayCalendar(..))
 import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
 import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (Period(..), PeriodEnum(..), RollConventionEnum(..))
 import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
-import Daml.Finance.Interface.Util.Common (qty)
-import DA.Date (toGregorian)
 import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..))
 import Daml.Finance.Data.Time.DateClock.Types qualified as DateClock
 import Daml.Finance.Interface.Types.Date.Classes
+
+import Workflow.Servicing (clockUpdateEvent)
+import qualified DA.Set as Set
+import Daml.Finance.Claims.Lifecycle.Rule as Lifecycle (Rule(..))
+import qualified Daml.Finance.Interface.Lifecycle.Rule.Lifecycle as Lifecycle
+import qualified DA.Map as Map
+import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
+import DA.Time (days, time)
 
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
@@ -51,9 +42,6 @@ data SettlementState = SettlementState
     bobAccount : AccountKey
     usdInstrument : InstrumentKey
     bondInstrument : InstrumentKey
-    routeProviderCid : ContractId RouteProvider.I
-    settlementFactoryCid : ContractId Settlement.F
-    aliceHoldingCid : ContractId Holding.I
     bobHoldingCid : ContractId Holding.I
   deriving (Eq, Show)
 
@@ -85,6 +73,15 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
         terminationDate = maturityDate
     -- CREATE_PERIODIC_SCHEDULE_END
     periodicSchedule
+
+createReference : ContractId BaseInstrument.I -> Party -> Party -> [(Text, Parties)] ->
+  Script InstrumentKey
+createReference cid depository issuer observers = do
+  instrumentView <- submitMulti [depository, issuer] [] do
+    exerciseCmd cid BaseInstrument.GetView with viewer = issuer
+  let ref = BaseInstrument.Reference with instrumentView; cid; observers = M.fromList observers
+  submitMulti [depository, issuer] [] do createCmd ref
+  pure $ key ref
 
 run : Script ()
 run = do
@@ -120,11 +117,11 @@ runSettlement = do
       id = instrumentId
       version = instrumentVersion
 
-  now <- getTime
+  setTime (time (date 2023 Apr 10) 0 0 0)
 
   let businessDayConvention = Cal.Following
       periodicSchedule = createPaymentPeriodicSchedule
-        (date 2023 Apr 10)
+        (date 2023 May 10)
         []
         businessDayConvention
         M
@@ -132,15 +129,14 @@ runSettlement = do
         (date 2023 Apr 10)
         (date 2028 Apr 10)
 
-
-  bondInstrumentCid <- toInterfaceContractId @Instrument.I <$> submit bank do
+  bondInstrumentCid <- toInterfaceContractId @BaseInstrument.I <$> submit bank do
     createCmd FR.Instrument with
       depository = bank
       issuer = bank
       id = instrumentId
       version = instrumentVersion
       description = "Instrument representing a bond"
-      observers = empty
+      observers = Map.fromList [("Bob", Set.singleton bob)]
       couponRate = 0.005
       periodicSchedule
       holidayCalendarIds = []
@@ -149,83 +145,36 @@ runSettlement = do
       currency = usdInstrument
       lastEventTimestamp = toUTCTime (DateClock.Unit (date 2028 Apr 10))
 
+  bondRef <- createReference bondInstrumentCid bank bank []
 
+  passTime (days 30)
+  
+  let borrower = bob
+      lender = bank
+      agent = bank
+      today = date 2023 May 10
+      parties = Set.fromList [borrower, lender, agent]
+      updateEvent = clockUpdateEvent parties parties today
+  updateEventCid <- fmap toInterfaceContractId $
+    submitMulti [agent,bob] [] $ do createCmd updateEvent
+  
+  rule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
+    submit agent $ createCmd $ Lifecycle.Rule with
+      providers = Set.singleton agent
+      observers = Map.fromList [("bob", Set.singleton bob), ("bank", Set.singleton bank)]
+      lifecycler = agent
+      id = Id "LifecycleRule"
+      description = "Rule to lifecycle the bond instrument"
+  
+  (newBondOpt, effectCids) <- submit bank $
+    exerciseCmd rule Lifecycle.Evolve with
+      eventCid = updateEventCid
+      observableCids = []
+      instrument = bondRef
 
-  -- Credit Alice's account with a token holding
-  aliceRequestCid <- submit alice do
-    createCmd CreditAccount.Request with
-      account = aliceAccount
-      instrument = bondInstrument
-      amount = 10.0
-  aliceHoldingCid <- submit bank do exerciseCmd aliceRequestCid CreditAccount.Accept
-
-  -- Setup a route provider
-  -- This is used transform settlement `Step`s into a `RoutedStep`s using a single custodian
-  -- ROUTE_PROVIDER_BEGIN
-  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit bank do
-    createCmd SingleCustodian with
-      provider = bank; observers = S.fromList [alice, bob] ; custodian = bank
-  -- ROUTE_PROVIDER_END
-
-  -- Setup a Settlement Factory facility
-  -- This is used to generate settlement instructions from a list of `RoutedStep`s
-  -- SETTLEMENT_FACTORY_BEGIN
-  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit bank do
-    createCmd Factory with
-      provider = bank
-      observers = S.fromList [alice, bob]
-  -- SETTLEMENT_FACTORY_END
-
-  -- Alice proposes an FX trade to Bob
-  -- DVP_PROPOSE_BEGIN
-  dvpProposalCid <- submit bob do
-    createCmd DvP.Proposal with
-      id = "xccy trade"
-      recQuantity = qty 10.0 bondInstrument
-      payQuantity = qty 1000.0 usdInstrument
-      proposer = bob
-      counterparty = alice
-      routeProviderCid
-      settlementFactoryCid
-  -- DVP_PROPOSE_END
-
-  -- DVP_ACCEPT_BEGIN
-  (batchCid, recSettleInstructionCid, paySettleInstructionCid) <- submit alice do
-    exerciseCmd dvpProposalCid DvP.Accept
-  -- DVP_ACCEPT_END
-
-  -- Settle the DvP Trade
-
-  -- i. Bob allocates his asset, Alice approves by providing her account.
-  (allocatedPaySettleInstructionCid, _) <- submit bob do
-    exerciseCmd paySettleInstructionCid Instruction.Allocate with
-      actors = S.singleton bob
-      allocation = Pledge bobHoldingCid
-
-  approvedPaySettleInstructionCid <- submit alice do
-    exerciseCmd allocatedPaySettleInstructionCid Instruction.Approve with
-      actors = S.singleton alice
-      approval = TakeDelivery aliceAccount
-
-  -- ii. Alice allocates her asset, Bob approves by providing his account.
-  -- ALLOCATE_APPROVE_BEGIN
-  (allocatedRecSettleInstructionCid, _) <- submit alice do
-    exerciseCmd recSettleInstructionCid Instruction.Allocate with
-      actors = S.singleton alice
-      allocation = Pledge aliceHoldingCid
-
-  approvedRecSettleInstructionCid <- submit bob do
-    exerciseCmd allocatedRecSettleInstructionCid Instruction.Approve with
-      actors = S.singleton bob
-      approval = TakeDelivery bobAccount
-  -- ALLOCATE_APPROVE_END
-
-  -- iii. Bob executes the settlement.
-  -- SETTLE_BEGIN
-  [bobHoldingCid, aliceHoldingCid] <- submitMulti [bob] [public] do
-    exerciseCmd batchCid Batch.Settle with
-      actors = singleton bob
-  -- SETTLE_END
+  case newBondOpt of
+    None -> debug "NO NEW STUFF"
+    Some b -> debug $ show b
 
   pure $ SettlementState with
     alice
@@ -236,7 +185,4 @@ runSettlement = do
     bobAccount
     usdInstrument
     bondInstrument
-    routeProviderCid
-    settlementFactoryCid
-    aliceHoldingCid = toInterfaceContractId aliceHoldingCid
     bobHoldingCid = toInterfaceContractId bobHoldingCid
