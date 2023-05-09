@@ -7,7 +7,6 @@ module Tests.Common where
 -}
 
 import DA.Action
-import DA.List
 import DA.Foldable
 import DA.Map (empty)
 import qualified DA.Map as Map
@@ -27,10 +26,7 @@ import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as Single
 import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
-import Daml.Finance.Interface.Holding.Transferable (Transfer)
-import qualified Daml.Finance.Holding.Fungible as FungibleX
 import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
-import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
 import Daml.Finance.Interface.Holding.Fungible (Fungible, Fungible, SplitResult(SplitResult))
 import qualified Daml.Finance.Interface.Holding.Base as B
 import Workflow.SettlementProposal
@@ -124,7 +120,8 @@ initialTest : LedgerParties -> Script ()
 initialTest parties = do
   stuff <- preOrigination parties
   originationData <- origination parties stuff
-  servicing parties originationData
+  -- servicing parties originationData
+  pure ()
 
 -- | Information required for denominating the loans
 -- and settling payments.
@@ -317,9 +314,10 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
-  -- Settlement
+  pure loanAgreement
+  -- Construct a bond representing the payment structure of the loan
   now <- getTime
-  let (bond, amount) = loanAgreementToBondAndAmount now undefined loanAgreement
+  let (bond, amount) = loanAgreementToBondAndAmount now usdInstrument loanAgreement
   (bondRef,bondCid) <- createBond bond
   return Origination with
     loanAgreement
@@ -438,9 +436,22 @@ settleLoan LedgerParties {..} loanAgreement = do
       routeProviderCid
       settlementFactoryCid
 
-  -- (batchCid, recSettleInstructionCid, paySettleInstructionCid) <- submit borrower_alice do
-  --   exerciseCmd settlementProposalCid Accept_Borrower
+  _ <- submit lender_gary do
+    exerciseCmd settlementProposalCid $ Accept_Lender lender_gary
+
+  _ <- submit lender_hortense do
+    exerciseCmd settlementProposalCid $ Accept_Lender lender_hortense
+
   settlementRes <- submit borrower_alice do
     exerciseCmd settlementProposalCid Accept_Borrower
 
   return ()
+
+createRouteProvider : LedgerParties -> Script (ContractId RouteProvider.I)
+createRouteProvider LedgerParties {..} = do
+  -- 1. Create Route Provider
+  toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
+      createCmd SingleCustodian.SingleCustodian with
+        provider = fed_ingrid
+        observers = S.fromList [borrower_alice, borrower_bob]
+        custodian = fed_ingrid

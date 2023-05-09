@@ -26,7 +26,7 @@ template SettlementProposal
   where
     signatory loan.agent
     observer loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
-    choice Accept_Borrower : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
+    choice Accept_Borrower : Optional (ContractId Batch.I, [ContractId Instruction.I])
       controller loan.borrower
       do
         let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
@@ -36,7 +36,7 @@ template SettlementProposal
         else do
           create this with sigAccumulator = loan.borrower::sigAccumulator
           return None
-    choice Accept_Lender : Optional (ContractId Batch.I, ContractId Instruction.I, ContractId Instruction.I)
+    choice Accept_Lender : Optional (ContractId Batch.I, [ContractId Instruction.I])
       with
         currLender : Party
       controller (map fst $ Map.toList loan.participantsWithAmounts)
@@ -53,7 +53,7 @@ template SettlementProposal
 
     choice Decline : ()
       -- ^ Decline the request.
-      controller loan.borrower -- TODO: Lenders should be allowed to decline
+      controller loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
       do pure ()
 
     choice Withdraw : ()
@@ -61,7 +61,6 @@ template SettlementProposal
       controller loan.agent
       do pure ()
 
--- settleTransactions :: LoanAgreement -> [Party] -> Text -> RouteProvider -> _
 settleTransactions :
   (HasField "agent" r1 Party
   , HasField "amount" r2 (Numeric 10)
@@ -72,7 +71,7 @@ settleTransactions :
   , HasExercise t1 RouteProvider.Discover [RoutedStep]
   , HasExercise t2 Settlement.Instruct (a, [c])
   )
-  => r1 -> [Party] -> Text -> ContractId t1 -> ContractId t2 -> Update (Optional (a, c, c))
+  => r1 -> [Party] -> Text -> ContractId t1 -> ContractId t2 -> Update (Optional (a , [c]))
 settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid = do
   -- Settlement of lenders
   let lenderSteps = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
@@ -88,8 +87,7 @@ settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactor
     steps = borrowerStep::lenderSteps
 
   -- Instruct settlement
-  (containerCid, [recInstructionCid, payInstructionCid]) <-
-    exercise settlementFactoryCid Settlement.Instruct with
+  instructRes <- exercise settlementFactoryCid Settlement.Instruct with
       instructors = S.fromList $ loan.agent::lendersAndBorrowers
       settlers = singleton loan.agent
       id = Id id
@@ -98,4 +96,4 @@ settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactor
       routedSteps
       settlementTime = None -- i.e., immediate settlement
 
-  return $ Some (containerCid, recInstructionCid, payInstructionCid)
+  return $ Some instructRes
