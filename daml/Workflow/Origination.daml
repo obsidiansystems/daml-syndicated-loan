@@ -1,6 +1,6 @@
 module Workflow.Origination where
 
-import DA.Date (toGregorian, addDays, toDateUTC)
+import DA.Date (date, toGregorian, addDays, toDateUTC)
 import DA.Map (Map)
 import qualified DA.Map as Map
 import qualified DA.Set as Set
@@ -315,7 +315,7 @@ loanAgreementToBond
 loanAgreementToBond now usd a =
   let numberOfParticipants = Map.size a.participantsWithAmounts
   in Instrument with
-    depository = a.agent -- same as agent for now
+    depository = a.agent -- TODO: A bit odd
     issuer = a.borrower
     id = Id a.uuid
     version = "0"

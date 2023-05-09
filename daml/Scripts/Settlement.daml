@@ -28,6 +28,9 @@ import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvide
 import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as SingleCustodian
 import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
 import Daml.Finance.Settlement.Factory (observers, provider, Factory(Factory))
+import Daml.Finance.Interface.Lifecycle.Effect (Effect)
+import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle (Evolve(Evolve))
+import qualified Daml.Finance.Interface.Settlement.Batch as Batch
 
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
@@ -126,17 +129,15 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
   updateEventCid <- fmap toInterfaceContractId $
     submitMulti [agent,borrower,lender] [] $ do createCmd updateEvent
   
-  {-
-  rule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
-    submit agent $ createCmd $ Lifecycle.Rule with
-      providers = Set.singleton agent
+  lifecycleRule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
+    submitMulti [agent, borrower] [] $ createCmd $ Lifecycle.Rule with
+      providers = Set.fromList [agent, borrower]
       observers = Map.fromList [("borrower", Set.singleton borrower), ("fed", Set.singleton fed_ingrid)]
       lifecycler = agent
       id = Id "LifecycleRule"
       description = "Rule to lifecycle the bond instrument"
-  -}
   
-  rule <- fmap (toInterfaceContractId @ClaimI.I) $
+  claimRule <- fmap (toInterfaceContractId @ClaimI.I) $
     submit agent $ createCmd $ Claim.Rule with
       providers = Set.fromList [agent]
       claimers = Set.singleton lender_gary
@@ -144,15 +145,27 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       routeProviderCid
       settlementFactoryCid
       netInstructions = False
-  
-  (newBondOpt, effectCids) <- submitMulti [agent_charlie, borrower_alice] [] $
-    exerciseCmd rule Lifecycle.Evolve with
-      eventCid = updateEventCid
-      observableCids = []
-      instrument = orig.bond.reference
 
+  (newBondOpt, [effectCid]) <- submitMulti [agent_charlie, borrower_alice] [] $
+    exerciseCmd lifecycleRule Lifecycle.Evolve with
+      eventCid = updateEventCid
+      instrument = orig.bond.reference
+      observableCids = []
+
+  claimResult <- submitMulti [agent_charlie, borrower_alice, lender_gary] [] $
+    exerciseCmd claimRule ClaimI.ClaimEffect with
+      claimer = lender_gary
+      holdingCids = [orig.garyBondHoldingKey]
+      effectCid
+      batchId = Id "Loan interest payment"
+  {-
+  submitMulti [agent_charlie, borrower_alice] [] do
+    exerciseCmd claimResult.batchCid Batch.Settle with
+      actors = Set.singleton borrower_alice
+  -}
+  {-
   case newBondOpt of
     None -> debug "NO NEW STUFF"
     Some b -> debug $ show b
-
+  -}
   return ()
