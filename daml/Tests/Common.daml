@@ -377,7 +377,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
         description = "Account for Gary's holding of Alice's Bond at Bank"
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
-        observers = []
+        observers = [borrower_alice]
 
   bondTransferReq <- submit lender_gary do
     createCmd Transfer.Request with
@@ -386,7 +386,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
       amount = loanAgreement.loanTerms.amount
       currentOwner = borrower_alice
 
-  garyBondHoldingKey <- submitMulti [borrower_alice,lender_gary] [] do
+  garyBondHoldingKey <- submit borrower_alice do
     exerciseCmd bondTransferReq Transfer.Accept with
       holdingCid = aliceBondHoldingKey
 
