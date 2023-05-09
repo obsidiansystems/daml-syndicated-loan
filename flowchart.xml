@@ -1,0 +1,119 @@
+<mxfile host="app.diagrams.net" modified="2023-05-09T19:23:24.385Z" agent="Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/111.0" version="21.2.9" etag="3pKVSzTVykbOb_8o1MD5" type="device">
+  <diagram id="6dcZfdGKkRcFQ_GHK7ds" name="Page-1">
+    <mxGraphModel dx="995" dy="948" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="edge5" style="rounded=1;html=1;exitX=0.5;exitY=1;entryX=1;entryY=0.5;jettySize=auto;endArrow=block;dashed=0;endFill=1;exitDx=0;exitDy=0;entryDx=0;entryDy=0;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;edgeStyle=orthogonalEdgeStyle;" parent="1" source="node1" target="node7" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge1" style="rounded=1;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;jettySize=auto;curved=0;endArrow=block;dashed=0;endFill=1;exitDx=0;exitDy=0;entryDx=0;entryDy=0;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="1" source="node2" target="node6" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2" style="rounded=1;html=1;exitX=0.5;exitY=1;entryX=0;entryY=0.5;jettySize=auto;endArrow=block;dashed=0;endFill=1;exitDx=0;exitDy=0;entryDx=0;entryDy=0;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;edgeStyle=orthogonalEdgeStyle;" parent="1" source="node3" target="node8" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3" style="rounded=1;html=1;exitX=0.5;exitY=1;entryX=0;entryY=0.5;jettySize=auto;endArrow=block;dashed=0;endFill=1;exitDx=0;exitDy=0;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="1" source="node4" target="node10" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge6" style="rounded=1;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;jettySize=auto;curved=0;endArrow=block;dashed=0;endFill=1;exitDx=0;exitDy=0;entryDx=0;entryDy=0;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="1" source="node6" target="node1" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge7" style="rounded=1;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;jettySize=auto;curved=0;endArrow=block;dashed=0;endFill=1;entryDx=0;entryDy=0;exitDx=0;exitDy=0;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="1" source="node7" target="node3" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge9" style="rounded=1;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;jettySize=auto;curved=0;endArrow=block;dashed=0;endFill=1;entryDx=0;entryDy=0;exitDx=0;exitDy=0;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="1" source="node9" target="node4" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge14" style="rounded=1;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;jettySize=auto;curved=0;endArrow=block;dashed=0;endFill=1;exitDx=0;exitDy=0;entryDx=0;entryDy=0;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="1" source="node14" target="node5" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="sf7rV072Tn7nC8xYfy2o-1" value="Agent" style="swimlane;whiteSpace=wrap;html=1;startSize=23;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="380" y="20" width="350" height="650" as="geometry">
+            <mxRectangle x="500" y="20" width="70" height="30" as="alternateBounds" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="node6" value="Pre-underwriting" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=14;strokeWidth=2;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-1" vertex="1">
+          <mxGeometry x="45.98999999999999" y="54.99999999999996" width="108" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="node7" value="Propose Terms" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=14;strokeWidth=2;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-1" vertex="1">
+          <mxGeometry x="60.98999999999999" y="126.99999999999994" width="78" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="node8" value="Solicit Lenders" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=14;strokeWidth=2;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-1" vertex="1">
+          <mxGeometry x="55.48999999999999" y="199.99999999999994" width="89" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="node9" value="Choose Lenders" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=14;strokeWidth=2;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-1" vertex="1">
+          <mxGeometry x="67.49" y="270.99999999999994" width="65" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="node10" value="&lt;p style=&quot;margin: 4px 0px 0px; text-align: center; font-size: 12px; color: rgb(0, 0, 0);&quot;&gt;closing&lt;/p&gt;" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=14;strokeWidth=2;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-1" vertex="1">
+          <mxGeometry x="71.99" y="342.99999999999994" width="56" height="36.00000000000006" as="geometry" />
+        </mxCell>
+        <mxCell id="node11" value="&lt;div style=&quot;font-size: 12px;&quot;&gt;Payments remaining?&lt;/div&gt;" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.decision;whiteSpace=wrap;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-1" vertex="1">
+          <mxGeometry x="30.56" y="400" width="138.87" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="node13" value="&lt;div style=&quot;font-size: 12px;&quot;&gt;Wait for next payment date&lt;/div&gt;&lt;div style=&quot;font-size: 12px;&quot;&gt;&lt;br style=&quot;font-size: 12px;&quot;&gt;&lt;/div&gt;" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.delay;whiteSpace=wrap;verticalAlign=middle;fontFamily=Helvetica;fontSize=12;" parent="sf7rV072Tn7nC8xYfy2o-1" vertex="1">
+          <mxGeometry x="46.48999999999999" y="498" width="107.01" height="63" as="geometry" />
+        </mxCell>
+        <mxCell id="node14" value="Evolve" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=14;strokeWidth=2;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-1" vertex="1">
+          <mxGeometry x="59.1" y="590.0000000000001" width="81.78" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="edge10" style="rounded=1;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;jettySize=auto;curved=0;endArrow=block;dashed=0;endFill=1;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-1" source="node10" target="node11" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge12" style="rounded=1;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;jettySize=auto;curved=0;endArrow=block;dashed=0;endFill=1;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-1" source="node11" target="node13" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge11" style="rounded=1;html=1;exitX=1;exitY=0.5;entryX=0.5;entryY=0;jettySize=auto;endArrow=block;dashed=0;endFill=1;exitDx=0;exitDy=0;exitPerimeter=0;edgeStyle=orthogonalEdgeStyle;entryDx=0;entryDy=0;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;entryPerimeter=0;" parent="sf7rV072Tn7nC8xYfy2o-1" source="node11" target="sf7rV072Tn7nC8xYfy2o-11" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="183.78999999999996" y="450.9999999999998" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge13" style="rounded=1;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;jettySize=auto;curved=0;endArrow=block;dashed=0;endFill=1;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-1" source="node13" target="node14" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="sf7rV072Tn7nC8xYfy2o-11" value="Done" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.terminator;whiteSpace=wrap;" vertex="1" parent="sf7rV072Tn7nC8xYfy2o-1">
+          <mxGeometry x="200" y="500" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="sf7rV072Tn7nC8xYfy2o-2" value="&lt;div style=&quot;font-size: 12px;&quot;&gt;Borrower&lt;/div&gt;" style="swimlane;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="180" y="20" width="200" height="650" as="geometry" />
+        </mxCell>
+        <mxCell id="node2" value="Apply for Loan" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=14;strokeWidth=2;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-2" vertex="1">
+          <mxGeometry x="26.5" y="54.99999999999997" width="146.99999999999994" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="node3" value="&lt;p style=&quot;margin: 4px 0px 0px; text-align: center; font-size: 12px; color: rgb(0, 0, 0);&quot;&gt;Accept Terms?&lt;/p&gt;" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.decision;whiteSpace=wrap;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-2" vertex="1">
+          <mxGeometry x="14.54" y="100" width="170.92" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="node4" value="Accept Loan?" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.decision;whiteSpace=wrap;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-2" vertex="1">
+          <mxGeometry x="20" y="250.25" width="153.5" height="77.5" as="geometry" />
+        </mxCell>
+        <mxCell id="node5" value="Claim" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=14;strokeWidth=2;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-2" vertex="1">
+          <mxGeometry x="39.99999999999994" y="590" width="102.38" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="edge8" style="rounded=1;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;jettySize=auto;curved=0;endArrow=block;dashed=0;endFill=1;exitDx=0;exitDy=0;entryDx=0;entryDy=0;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="1" source="node8" target="node15" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge16" style="rounded=1;html=1;exitX=0.5;exitY=0.925;entryX=1;entryY=0.5;jettySize=auto;endArrow=block;dashed=0;endFill=1;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;elbow=vertical;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="1" source="node15" target="node9" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge15" style="rounded=1;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;jettySize=auto;curved=0;endArrow=block;dashed=0;endFill=1;exitDx=0;exitDy=0;entryDx=0;entryDy=0;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="1" source="node14" target="node16" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="sf7rV072Tn7nC8xYfy2o-3" value="Underwriter" style="swimlane;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="730" y="20" width="200" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="node1" value="&lt;p style=&quot;margin: 4px 0px 0px; text-align: center; font-size: 12px; color: rgb(0, 0, 0);&quot;&gt;Underwrite&lt;/p&gt;" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=14;strokeWidth=2;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-3" vertex="1">
+          <mxGeometry x="61" y="55" width="78" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="sf7rV072Tn7nC8xYfy2o-4" value="Lender" style="swimlane;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="730" y="170" width="200" height="500" as="geometry" />
+        </mxCell>
+        <mxCell id="node16" value="Claim" style="rounded=1;whiteSpace=wrap;html=1;absoluteArcSize=1;arcSize=14;strokeWidth=2;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-4" vertex="1">
+          <mxGeometry x="73.01" y="440" width="54" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="node15" value="Interested?" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.decision;whiteSpace=wrap;fontFamily=Helvetica;fontSize=12;verticalAlign=middle;" parent="sf7rV072Tn7nC8xYfy2o-4" vertex="1">
+          <mxGeometry x="37.5" y="50" width="125.00999999999999" height="36" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
