@@ -136,7 +136,7 @@ runBondStep () = do
       calendarDataProvider = bank
       dayCountConvention = Act365Fixed
       currency = usdInstrument
-      lastEventTimestamp = toUTCTime (DateClock.Unit (date 2028 Apr 10))
+      lastEventTimestamp = toUTCTime (DateClock.Unit (date 2000 Apr 10))
 
   bondRef <- createReferenceS bondInstrumentCid bank bank (Map.empty)
 
