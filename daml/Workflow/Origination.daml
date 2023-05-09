@@ -29,6 +29,20 @@ import qualified Daml.Finance.Interface.Types.Date.Schedule as Sched
 newtype RatePerAnnum = RatePerAnnum { unRatePerAnnum : Decimal }
   deriving (Eq, Show, Ord)
 
+data LoanApplicationData = LoanApplicationData
+  with
+    instrument : InstrumentKey
+    -- ^ The instrument in which the loan is denominated
+    amount : Decimal
+    -- ^ The amount requested
+    durationYears : Int
+    -- ^ The loan term requested
+    maxInterestRate : RatePerAnnum
+    -- ^ The maximum interest rate desired
+    prospectus : Text
+    -- ^ An explanation, by the borrower, of what the loan will be used for
+  deriving (Eq, Ord, Show)
+
 -- | An application for a loan by a borrower
 -- NOTE: Borrowers may create and freely submit loan applications to agents. We do
 -- not limit the ability to apply in any way.
@@ -36,13 +50,7 @@ template LoanApplication
   with
     borrower : Party
     agent : Party
-    instrument : InstrumentKey
-    amount : Decimal
-    durationYears : Int  -- ^ Number of years
-    maxInterestRate : RatePerAnnum
-    prospectus : Text
-    -- ^ an explanation, by the borrower, of what the loan will be used for
-    -- TODO: The lenders (not just the underwriter) want to see the prospectus too
+    applicationData : LoanApplicationData
   where
     signatory borrower
     observer agent
@@ -69,9 +77,10 @@ template LoanApplication
           borrower
           agent
           uuid
-          instrument
-          amount
+          instrument = applicationData.instrument
+          amount = applicationData.amount
           rate
+
 template UnderwritingRequest
   with
     underwriter : Party
@@ -91,9 +100,7 @@ template UnderwritingRequest
         create UnderwritingResult with
           underwriter
           agent = loan.agent
-          instrument = loan.instrument
-          amount = loan.amount
-          maxInterestRate = loan.maxInterestRate
+          applicationData = loan.applicationData
           uuid
           result
 
@@ -102,9 +109,7 @@ template UnderwritingResult
     underwriter : Party
     uuid : Text
     agent : Party
-    instrument : InstrumentKey
-    amount : Decimal
-    maxInterestRate : RatePerAnnum
+    applicationData : LoanApplicationData
     result : Bool
   where
     signatory agent, underwriter
@@ -128,7 +133,7 @@ template UnderwritingDisclosure
     signatory underwriting.underwriter, underwriting.agent
     observer participant
 
-    nonconsuming choice CreateLoanRequest : ContractId FundingRequest
+    nonconsuming choice MakeFundingRequest : ContractId FundingRequest
       with
         participant : Party
       controller underwriting.agent
@@ -136,7 +141,7 @@ template UnderwritingDisclosure
         create FundingRequest with
           agent = underwriting.agent
           uuid = underwriting.uuid
-          totalApplicationAmount = underwriting.amount
+          totalApplicationAmount = underwriting.applicationData.amount
           participant
           underwrite = self
 
@@ -164,12 +169,12 @@ template FundingRequest
       do
         disclosed <- fetch underwrite
         assertMsg "Must respond with an interest rate less than the maximum underwritten" $
-          rate <= disclosed.underwriting.maxInterestRate
+          rate <= disclosed.underwriting.applicationData.maxInterestRate
         create FundingInterest with
           agent
           uuid
           participant
-          instrument = disclosed.underwriting.instrument
+          instrument = disclosed.underwriting.applicationData.instrument
           amount
           rate
 
@@ -188,6 +193,10 @@ template FundingInterest
     observer agent
     key (participant, agent, uuid) : (Party, Party, Text)
     maintainer key._1
+    choice FundingInterest_Decline : ()
+      controller agent
+      do
+        pure ()
     choice FundingInterest_SignAgreement : ContractId PendingLoanAgreement
       with
         agreementCid : ContractId PendingLoanAgreement
