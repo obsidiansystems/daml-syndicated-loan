@@ -306,7 +306,8 @@ loanAgreementToBondAndAmount
   -> LoanAgreement
   -> (Bond, Decimal)
 loanAgreementToBondAndAmount now usd a = (, a.loanTerms.amount)
-  Instrument with
+  let numberOfParticipants = Map.size a.participantsWithAmounts
+  in Instrument with
     depository = a.agent -- same as agent for now
     issuer = a.borrower
     id = Id a.uuid
@@ -318,7 +319,7 @@ loanAgreementToBondAndAmount now usd a = (, a.loanTerms.amount)
     calendarDataProvider = a.agent -- NOT USED!
     dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
     currency = usd
-    observers = Map.fromList $ zip (map show [1..]) (map Set.singleton (Map.keys a.participantsWithAmounts))
+    observers = Map.fromList $ zip (map show [1..numberOfParticipants]) (map Set.singleton (Map.keys a.participantsWithAmounts))
     lastEventTimestamp = now
   where
     startDate = toDateUTC now

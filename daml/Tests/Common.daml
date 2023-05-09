@@ -31,6 +31,7 @@ import Daml.Finance.Interface.Holding.Fungible (Fungible, Fungible, SplitResult(
 import qualified Daml.Finance.Interface.Holding.Base as B
 import Workflow.SettlementProposal
 import Workflow.Transfer qualified as Transfer
+import Workflow.Util
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -266,7 +267,7 @@ data Origination = Origination with
   bondCid : ContractId (BaseInstrument.I)
   amount : Decimal
 
-origination : LedgerParties -> PreOriginationStuff -> Script LoanAgreement
+origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
@@ -314,8 +315,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
   pure loanAgreement
-  {-
-  -- Settlement
+  -- Construct a bond representing the payment structure of the loan
   now <- getTime
   let (bond, amount) = loanAgreementToBondAndAmount now usdInstrument loanAgreement
   (bondRef,bondCid) <- createBond bond
@@ -326,7 +326,6 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     bondRef
     bondCid
     amount
-  -}
 
 type Amount = Decimal
 

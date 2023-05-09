@@ -24,4 +24,3 @@ createBond bond = do
     createCmd bond
   bondRef <- createReference bondCid bond.depository bond.issuer bond.observers
   return (bondRef, bondCid)
-  
