@@ -44,7 +44,7 @@ import Workflow.Transfer qualified as Transfer
 import Workflow.Util
 import qualified Daml.Finance.Interface.Settlement.Instruction as Instruction
 import qualified Daml.Finance.Interface.Settlement.Instruction as Settlement.I
-import Daml.Finance.Interface.Settlement.Types (Allocation(Pledge))
+import Daml.Finance.Interface.Settlement.Types (TakeDelivery, Allocation(Pledge))
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -471,17 +471,27 @@ settleLoan LedgerParties {..} loanAgreement = do
   -- TODO: initiate Map Party (ContractId Holding)
   let partyHoldingsMap = Map.empty
 
-  allocatedSettleInstructions <- forA routedSteps $ \(icid, routedStep) -> submit agent_charlie do
+  allocatedSettleInstructions <- forA routedSteps $ \(icid, routedStep) -> do
     let Some receiverHoldingCid = Map.lookup routedStep.receiver partyHoldingsMap
-    exerciseCmd icid Instruction.Allocate with
-      actors = S.singleton agent_charlie
-      allocation = Pledge receiverHoldingCid
+    allocInstructions <- submit agent_charlie do
+      exerciseCmd icid Instruction.Allocate with
+        actors = S.singleton agent_charlie
+        allocation = Pledge receiverHoldingCid
+    return (routedStep.receiver, allocInstructions)
 
-  -- WIP:
-  -- approvedRecSettleInstructionCid <- submit bob do
-  --   exerciseCmd allocatedRecSettleInstructionCid Instruction.Approve with
-  --     actors = S.singleton bob
-  --     approval = TakeDelivery bobAccount
+  -- TODO: initiate Map Party AccountKey
+  let partyAccountMap = Map.empty
+
+  approvedSettleInstuctionCids <- forA allocatedSettleInstructions $ \(approvingParty, (allocInstructionsCid, _)) -> submit approvingParty do
+    let Some approvingPartyAccount = Map.lookup approvingParty partyAccountMap
+    exerciseCmd allocInstructionsCid Instruction.Approve with
+      actors = S.singleton approvingParty
+      approval = TakeDelivery approvingPartyAccount
+
+  -- WIP: Settle all transactions
+  -- [bobHoldingCid, aliceHoldingCid] <- submitMulti [bob] [public] do
+  --   exerciseCmd batchCid Batch.Settle with
+  --     actors = singleton bob
 
   return ()
 
