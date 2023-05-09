@@ -444,3 +444,12 @@ settleLoan LedgerParties {..} loanAgreement = do
     exerciseCmd settlementProposalCid Accept_Borrower
 
   return ()
+
+createRouteProvider : LedgerParties -> Script (ContractId RouteProvider.I)
+createRouteProvider LedgerParties {..} = do
+  -- 1. Create Route Provider
+  toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
+      createCmd SingleCustodian.SingleCustodian with
+        provider = fed_ingrid
+        observers = S.fromList [borrower_alice, borrower_bob]
+        custodian = fed_ingrid
