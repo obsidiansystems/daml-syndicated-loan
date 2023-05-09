@@ -44,23 +44,8 @@ data LedgerParties = LedgerParties with
     fed_ingrid : Party
   deriving (Show, Eq, Ord)
 
-
 perfTest : LedgerParties -> Script ()
-perfTest parties = do
-  let LedgerParties{..} = parties
-      instrumentId = Id "USD"
-      instrumentVersion = "0"
-      usdInstrument = InstrumentKey with
-        issuer = fed_ingrid
-        depository = fed_ingrid
-        id = instrumentId
-        version = instrumentVersion
-  accountkeys <- createAccounts parties
-  pure ()
-
-
-createAccounts : LedgerParties -> Script ()
-createAccounts LedgerParties{..} = do
+perfTest LedgerParties{..} = do
     let instrumentId = Id "USD"
         instrumentVersion = "0"
         usdInstrument = InstrumentKey with
