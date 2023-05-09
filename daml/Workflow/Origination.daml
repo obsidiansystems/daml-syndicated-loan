@@ -77,9 +77,12 @@ template LoanApplication
           borrower
           agent
           uuid
-          instrument = applicationData.instrument
-          amount = applicationData.amount
-          rate
+          applicationData
+          terms = LoanTerms with
+            instrument = applicationData.instrument
+            amount = applicationData.amount
+            rate
+            durationYears = applicationData.durationYears
 
 template UnderwritingRequest
   with
@@ -219,10 +222,8 @@ template SyndicatedLoanOffer
     agent : Party
     uuid : Text
     borrower : Party
-    instrument : InstrumentKey
-    amount : Decimal
-    rate : RatePerAnnum
-    -- other terms: term, fees, covenants, etc.
+    applicationData : LoanApplicationData
+    terms : LoanTerms
     --NOTE: Maybe a covenant, once agreed by the borrower, could actually grant access to some on-chain data in the future, which is necessary to enforce it. and this could also trigger on-chain modifications of the loan.
   where
     signatory agent
@@ -235,10 +236,9 @@ template SyndicatedLoanOffer
         create AcceptedLoan with
           agent
           borrower
-          instrument
-          amount
-          rate
-
+          uuid
+          applicationData
+          terms
 
 data LoanTerms = LoanTerms with
     instrument : InstrumentKey
@@ -253,10 +253,10 @@ data LoanTerms = LoanTerms with
 template AcceptedLoan
   with
     agent : Party
-    instrument : InstrumentKey
     borrower : Party
-    amount : Decimal
-    rate : RatePerAnnum
+    uuid : Text
+    applicationData : LoanApplicationData
+    terms : LoanTerms
   where
     signatory borrower
     observer agent
@@ -267,12 +267,8 @@ template AcceptedLoan
       do
         agreement <- fetch agreementCid
         let pendingTerms = agreement.agreement.loanTerms
-        assertMsg "Amount on agreement does not match accepted terms" $
-          this.amount == pendingTerms.amount
-        assertMsg "Interest rate on agreement does not match accepted terms" $
-          this.rate == pendingTerms.rate
-        assertMsg "Borrower does not match" $
-          this.borrower == agreement.agreement.borrower
+        assertMsg "Accepted terms do not agree with final loan agreement" $
+          this.terms == pendingTerms
         exercise agreementCid PendingLoanAgreement_Sign with
           signer = this.borrower
 

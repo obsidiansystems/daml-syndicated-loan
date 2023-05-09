@@ -485,13 +485,9 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
         agent
         participantsWithAmounts
         borrower = acceptance.borrower
-        uuid = "golden" -- TODO: Thread these through
-        prospectus = "uhhh" -- TODO: Get this
-        loanTerms = LoanTerms with
-          instrument = acceptance.instrument
-          amount = acceptance.amount
-          rate = acceptance.rate
-          durationYears = 10 -- TODO: Get this
+        uuid = acceptance.uuid
+        prospectus = acceptance.applicationData.prospectus
+        loanTerms = acceptance.terms
           
   submit agent $ createCmd PendingLoanAgreement with
     agreement
