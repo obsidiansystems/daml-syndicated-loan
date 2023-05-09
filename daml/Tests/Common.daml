@@ -134,8 +134,8 @@ perfTest LedgerParties{..} = do
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
   preOriginationStuff <- preOrigination parties
-  originationData <- origination parties preOriginationStuff
-  _ <- settleLoan parties preOriginationStuff originationData
+  (originationData, bond) <- origination parties preOriginationStuff
+  _ <- settleLoan parties preOriginationStuff bond originationData
   -- servicing parties originationData
   pure ()
 
@@ -287,7 +287,7 @@ data Origination = Origination with
   bondCid : ContractId (BaseInstrument.I)
   amount : Decimal
 
-origination : LedgerParties -> PreOriginationStuff -> Script LoanAgreement
+origination : LedgerParties -> PreOriginationStuff -> Script (LoanAgreement, Bond)
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
@@ -337,7 +337,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   (loanAgreementCid, bond) <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
-  pure loanAgreement
+  pure (loanAgreement, bond)
 
 type Amount = Decimal
 
@@ -368,7 +368,7 @@ getFundingRequestsFor lender = query @FundingRequest lender
 -- TODO: Actually make a decision about amount and rate
 makeFundingInterest : Party -> ContractId FundingRequest -> (Decimal, RatePerAnnum) -> Commands (ContractId FundingInterest)
 makeFundingInterest lender requestCid (amount, rate) = exerciseCmd requestCid FundingRequest_Respond with
-    amount
+    amount = (amount - 1.0)
     rate
 
 makeUnderwritingRequest : Party -> Text -> ContractId LoanApplication -> Commands (ContractId UnderwritingRequest)
@@ -457,8 +457,8 @@ servicing LedgerParties{..} origination = do
   -}
   pure ()
 
-settleLoan : LedgerParties -> PreOriginationStuff -> LoanAgreement -> Script ()
-settleLoan LedgerParties {..} preOriginationStuff loanAgreement = do
+settleLoan : LedgerParties -> PreOriginationStuff -> Bond -> LoanAgreement -> Script ()
+settleLoan LedgerParties {..} preOriginationStuff bond loanAgreement = do
   -- Create Route Provider
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
       createCmd SingleCustodian.SingleCustodian with
@@ -491,8 +491,14 @@ settleLoan LedgerParties {..} preOriginationStuff loanAgreement = do
 
   -- Get sig of participating borrower, all signatures should have been accumulated, tx instructions should be produced
   -- TODO: Should case to ensure it actually is 'Some' instead of 'None'
-  Right (batchCid, instructionCids) <- submit borrower_alice do
+  -- Right (batchCid, instructionCids) <- submit borrower_alice do
+  --   exerciseCmd settlementProposalCid3 Accept_Borrower
+  eitherUpdatedContractOrBatchInstructions <- submit borrower_alice do
     exerciseCmd settlementProposalCid3 Accept_Borrower
+
+  (batchCid, instructionCids) <- case eitherUpdatedContractOrBatchInstructions of
+    Left err -> fail $ "All signatures should be present " <> (show err)
+    Right batchInstructions -> return batchInstructions
 
   -- Prepare to construct Allocate instructions
   -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids
@@ -501,20 +507,35 @@ settleLoan LedgerParties {..} preOriginationStuff loanAgreement = do
     pure (icid, iv)
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
+  -- Create bond holding for Alice
+  -- aliceRequestCid <- submit borrower_alice do
+  --   createCmd CreditAccount.Request with
+  --     account = preOriginationStuff.ledgerAccounts.aliceAccount
+  --     instrument = bond.reference
+  --     amount =  loanAgreement.loanTerms.amount
+
+  -- TODO: CAUTION DO NOT DO THIS, just a test
+  -- aliceBondHoldingCid <- submit fed_ingrid do exerciseCmd aliceRequestCid CreditAccount.Accept
+
   -- initiate Map Party (ContractId Holding)
   let partyHoldingsMap = Map.fromList
         [ (lender_gary, preOriginationStuff.garyCashHoldingCid)
         , (lender_hortense, preOriginationStuff.hortenseCashHoldingCid)
+        -- , (borrower_alice, aliceBondHoldingCid)
         ]
 
   -- Have each party pledge where funds should be coming from
   allocatedSettleInstructions <- forA routedSteps $ \(icid, routedStep) -> do
-    let Some receiverHoldingCid = Map.lookup routedStep.receiver partyHoldingsMap
-    allocInstructions <- submit agent_charlie do
-      exerciseCmd icid Instruction.Allocate with
-        actors = S.singleton agent_charlie
-        allocation = Pledge receiverHoldingCid
-    return (routedStep.receiver, allocInstructions)
+    -- let Some receiverHoldingCid = Map.lookup routedStep.receiver partyHoldingsMap
+    let optionalReceiverHoldingCid = Map.lookup routedStep.receiver partyHoldingsMap
+    case optionalReceiverHoldingCid  of
+      None -> fail $ "Could not find Holding for " <> (show routedStep.receiver)
+      Some receiverHoldingCid -> do
+        allocInstructions <- submit agent_charlie do
+          exerciseCmd icid Instruction.Allocate with
+            actors = S.singleton agent_charlie
+            allocation = Pledge receiverHoldingCid
+        return (routedStep.receiver, allocInstructions)
 
   -- initiate Map Party AccountKey
   let partyAccountMap = Map.fromList

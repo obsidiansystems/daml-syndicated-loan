@@ -24,25 +24,31 @@ template SettlementProposal
     routeProviderCid : ContractId RouteProvider.I
     settlementFactoryCid : ContractId Settlement.F
   where
-    signatory loan.agent
+    signatory loan.agent::sigAccumulator
     observer loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
+
     choice Accept_Borrower : Either (ContractId SettlementProposal) (ContractId Batch.I, [ContractId Instruction.I])
       controller loan.borrower
       do
-        let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
+        let lenders = (map fst $ Map.toList loan.participantsWithAmounts)
+            lendersAndBorrowers = loan.borrower::lenders
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
-        if (sort sigAccumulator) == (sort lendersAndBorrowers) then do
+        debug $ show lendersAndBorrowers
+        if (sort sigAccumulator) == (sort lenders) then do
           settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid
         else do
           updatedContract <- create this with sigAccumulator = loan.borrower::sigAccumulator
           return $ Left updatedContract
+
     choice Accept_Lender : Either (ContractId SettlementProposal) (ContractId Batch.I, [ContractId Instruction.I])
       with
         currLender : Party
-      controller (map fst $ Map.toList loan.participantsWithAmounts)
+      controller currLender
       do
+        assertMsg "Must be an authorized lender" $ elem currLender (map fst $ Map.toList loan.participantsWithAmounts)
         let lendersAndBorrowers : [Party] = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
+        debug $ show lendersAndBorrowers
         if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts) then do
           settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid
 
