@@ -37,7 +37,7 @@ import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
-import Daml.Finance.Interface.Holding.Fungible (Fungible, Fungible, SplitResult(SplitResult))
+import Daml.Finance.Interface.Holding.Fungible (I, Fungible, Fungible, SplitResult(SplitResult))
 import qualified Daml.Finance.Interface.Holding.Base as B
 import Workflow.SettlementProposal
 import Workflow.Transfer qualified as Transfer
@@ -139,6 +139,8 @@ initialTest parties = do
 data PreOriginationStuff = PreOriginationStuff with
   usdInstrument : InstrumentKey
   ledgerAccounts : LedgerAccounts
+  hortenseCashHoldingCid : ContractId B.I
+  garyCashHoldingCid : ContractId B.I
 
 -- | Only a subset of the parties involved need to have accounts
 -- to exercise the lifecycle of the loan.
@@ -269,6 +271,8 @@ preOrigination LedgerParties{..} = do
     return $ PreOriginationStuff with
       usdInstrument
       ledgerAccounts
+      hortenseCashHoldingCid
+      garyCashHoldingCid
 
 data Origination = Origination with
   loanAgreement : LoanAgreement
