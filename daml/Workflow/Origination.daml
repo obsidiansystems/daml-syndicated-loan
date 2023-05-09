@@ -1,6 +1,6 @@
 module Workflow.Origination where
 
-import DA.Date (addDays, toDateUTC)
+import DA.Date (toGregorian, addDays, toDateUTC)
 import DA.Map (Map)
 import qualified DA.Map as Map
 import qualified DA.Set as Set
@@ -8,12 +8,14 @@ import qualified DA.Set as Set
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
 import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..), BusinessDayConventionEnum(..))
-import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(Act360))
+import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(..), Period(..))
 import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFrequency(..), PeriodicSchedule(..))
 import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
 
 import Workflow.Util
+import qualified Daml.Finance.Interface.Types.Date.Calendar as Cal
+import qualified Daml.Finance.Interface.Types.Date.Schedule as Sched
 
 -- ### TODO
 --   * Include "start date" of the loan (used to calculate coupon payment dates)
@@ -322,33 +324,49 @@ loanAgreementToBond now usd a =
     periodicSchedule = schedule
     holidayCalendarIds = [] -- NOT USED!
     calendarDataProvider = a.agent -- NOT USED!
-    dayCountConvention = Act360 -- TODO: how does this impact servicing rules?
+    dayCountConvention = Act365Fixed -- TODO: how does this impact servicing rules?
     currency = usd
     observers = Map.fromList $ zip (map show [1..numberOfParticipants]) (map Set.singleton (Map.keys a.participantsWithAmounts))
     lastEventTimestamp = now
   where
     startDate = toDateUTC now
 
-    schedule = PeriodicSchedule with
-      effectiveDate = startDate
+    (y,m,d) = toGregorian startDate
 
-      terminationDate = addDays startDate (365 * a.loanTerms.durationYears)  -- TODO: for now just equal to 'effectiveDate' with 'a.loanTerms.durationYears' multiplied by 365 added to the year. However, this calculation depends on 'dayCountConvention'
+    schedule = createPaymentPeriodicSchedule
+      (date (y+1) m d)
+      []
+      Following
+      Y
+      1
+      startDate
+      (date (y+5) m d)
 
-      firstRegularPeriodStartDate = None -- TODO: what is a "regular" period?
-
-      lastRegularPeriodEndDate = None
-
-      frequency = Periodic $ Frequency with -- one time per year
-        period = (Period with period = Y; periodMultiplier = 1)
-        rollConvention = DOM 1
-
-      businessDayAdjustment = -- NOT USED
-        BusinessDayAdjustment with
-          calendarIds = []
-          convention = NoAdjustment
-
-      effectiveDateBusinessDayAdjustment = None
-
-      terminationDateBusinessDayAdjustment = None
-
-      stubPeriodType = None
+-- | Create a schedule for periodic payments.
+createPaymentPeriodicSchedule : Date -> [Text] -> Cal.BusinessDayConventionEnum -> PeriodEnum ->
+  Int -> Date -> Date -> PeriodicSchedule
+createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConvention couponPeriod
+  couponPeriodMultiplier issueDate maturityDate = do
+    -- CREATE_PERIODIC_SCHEDULE_BEGIN
+    let
+      (y, m, d) = toGregorian firstCouponDate
+      periodicSchedule = PeriodicSchedule with
+        businessDayAdjustment =
+          Cal.BusinessDayAdjustment with
+            calendarIds = holidayCalendarIds
+            convention = businessDayConvention
+        effectiveDateBusinessDayAdjustment = None
+        terminationDateBusinessDayAdjustment = None
+        frequency =
+          Sched.Periodic Sched.Frequency with
+            rollConvention = DOM d
+            period = Period with
+              period = couponPeriod
+              periodMultiplier = couponPeriodMultiplier
+        effectiveDate = issueDate
+        firstRegularPeriodStartDate = Some firstCouponDate
+        lastRegularPeriodEndDate = Some maturityDate
+        stubPeriodType = None
+        terminationDate = maturityDate
+    -- CREATE_PERIODIC_SCHEDULE_END
+    periodicSchedule
