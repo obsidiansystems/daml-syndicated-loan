@@ -37,12 +37,15 @@ import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
-import Daml.Finance.Interface.Holding.Fungible (Fungible, Fungible, SplitResult(SplitResult))
+import Daml.Finance.Interface.Holding.Fungible (I, Fungible, Fungible, SplitResult(SplitResult))
 import qualified Daml.Finance.Interface.Holding.Base as B
 import Workflow.SettlementProposal
 import Workflow.Transfer qualified as Transfer
 import Workflow.Util
 import qualified Daml.Finance.Interface.Settlement.Instruction as Instruction
+import qualified Daml.Finance.Interface.Settlement.Instruction as Settlement.I
+import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge))
+import qualified Daml.Finance.Interface.Settlement.Batch as Batch
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -139,6 +142,8 @@ initialTest parties = do
 data PreOriginationStuff = PreOriginationStuff with
   usdInstrument : InstrumentKey
   ledgerAccounts : LedgerAccounts
+  hortenseCashHoldingCid : ContractId B.I
+  garyCashHoldingCid : ContractId B.I
 
 -- | Only a subset of the parties involved need to have accounts
 -- to exercise the lifecycle of the loan.
@@ -269,6 +274,8 @@ preOrigination LedgerParties{..} = do
     return $ PreOriginationStuff with
       usdInstrument
       ledgerAccounts
+      hortenseCashHoldingCid
+      garyCashHoldingCid
 
 data Origination = Origination with
   loanAgreement : LoanAgreement
@@ -418,23 +425,23 @@ servicing LedgerParties{..} origination = do
   -}
   pure ()
 
-settleLoan : LedgerParties -> LoanAgreement -> Script ()
-settleLoan LedgerParties {..} loanAgreement = do
-  -- 1. Create Route Provider
+settleLoan : LedgerParties -> PreOriginationStuff -> LoanAgreement -> Script ()
+settleLoan LedgerParties {..} preOriginationStuff loanAgreement = do
+  -- Create Route Provider
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
       createCmd SingleCustodian.SingleCustodian with
         provider = fed_ingrid
         observers = S.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
         custodian = fed_ingrid
 
-  -- 2. Create Settlement Factory
+  -- Create Settlement Factory
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit fed_ingrid do
     createCmd Factory with
       provider = fed_ingrid
       observers = S.fromList [borrower_bob, borrower_alice]
 
 
-  -- 3. Generate Settlement Proposal
+  -- Generate Settlement Proposal
   settlementProposalCid <- submit agent_charlie do
     createCmd SettlementProposal with
       loan = loanAgreement
@@ -452,16 +459,52 @@ settleLoan LedgerParties {..} loanAgreement = do
 
   -- Get sig of participating borrower, all signatures should have been accumulated, tx instructions should be produced
   -- TODO: Should case to ensure it actually is 'Some' instead of 'None'
-  Some (containerCid, instructionCids) <- submit borrower_alice do
+  Some (batchCid, instructionCids) <- submit borrower_alice do
     exerciseCmd settlementProposalCid Accept_Borrower
 
   -- Prepare to construct Allocate instructions
-  let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids
+  -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids
+  instructionViews <- forA instructionCids $ \icid -> do
+    iv <- submit agent_charlie $ exerciseCmd icid Settlement.I.GetView with viewer = agent_charlie
+    pure (icid, iv)
+  let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
-  -- (allocatedSettleInstructionCid1, _) <- submit agent_charlie do
-  --    exerciseCmd instructionCid1 Instruction.Allocate with
-  --      actors = S.singleton agent_charlie
-  --      allocation = Pledge aliceHoldingCid
+  -- initiate Map Party (ContractId Holding)
+  let partyHoldingsMap = Map.fromList
+        [ (lender_gary, preOriginationStuff.garyCashHoldingCid)
+        , (lender_hortense, preOriginationStuff.hortenseCashHoldingCid)
+        ]
+
+  -- Have each party pledge where funds should be coming from
+  allocatedSettleInstructions <- forA routedSteps $ \(icid, routedStep) -> do
+    let Some receiverHoldingCid = Map.lookup routedStep.receiver partyHoldingsMap
+    allocInstructions <- submit agent_charlie do
+      exerciseCmd icid Instruction.Allocate with
+        actors = S.singleton agent_charlie
+        allocation = Pledge receiverHoldingCid
+    return (routedStep.receiver, allocInstructions)
+
+  -- initiate Map Party AccountKey
+  let partyAccountMap = Map.fromList
+        [ (borrower_alice, preOriginationStuff.ledgerAccounts.aliceAccount)
+        , (borrower_bob, preOriginationStuff.ledgerAccounts.bobAccount)
+        , (lender_gary, preOriginationStuff.ledgerAccounts.garyAccount)
+        , (lender_hortense, preOriginationStuff.ledgerAccounts.hortenseAccount)
+        , (agent_charlie, preOriginationStuff.ledgerAccounts.charlieAccount)
+        , (agent_debbie, preOriginationStuff.ledgerAccounts.debbieAccount)
+        ]
+
+  -- Have each party approve of transaction instructions
+  approvedSettleInstuctionCids <- forA allocatedSettleInstructions $ \(approvingParty, (allocInstructionsCid, _)) -> submit approvingParty do
+    let Some approvingPartyAccount = Map.lookup approvingParty partyAccountMap
+    exerciseCmd allocInstructionsCid Instruction.Approve with
+      actors = S.singleton approvingParty
+      approval = TakeDelivery approvingPartyAccount
+
+  -- Settle batched transactions atomically
+  holdingCids <- submitMulti [agent_charlie, borrower_alice, lender_gary, lender_hortense] [] do
+      exerciseCmd batchCid Batch.Settle with
+        actors = S.singleton agent_charlie
 
   return ()
 
