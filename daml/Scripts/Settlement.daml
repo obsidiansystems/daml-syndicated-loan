@@ -31,6 +31,7 @@ import qualified DA.Map as Map
 import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
 import DA.Time (days, time)
 import Workflow.Util
+import qualified Daml.Finance.Claims.Lifecycle.Rule as Lifecycle
 
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
@@ -75,9 +76,8 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
     -- CREATE_PERIODIC_SCHEDULE_END
     periodicSchedule
 
-{-
-run : () -> Script ()
-run () = do
+run : Script ()
+run = do
   runBondStep ()
   return ()
 
@@ -151,15 +151,25 @@ runBondStep () = do
   updateEventCid <- fmap toInterfaceContractId $
     submitMulti [agent,bob] [] $ do createCmd updateEvent
   
+  rule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
+    submit agent $ createCmd $ Lifecycle.Rule with
+      providers = Set.singleton agent
+      observers = Map.fromList [("bob", Set.singleton bob), ("bank", Set.singleton bank)]
+      lifecycler = agent
+      id = Id "LifecycleRule"
+      description = "Rule to lifecycle the bond instrument"
+
+  {-
   rule <- fmap (toInterfaceContractId @ClaimI.I) $
     submit agent $ createCmd $ Claim.Rule with
       providers = Set.fromList [agent, bob]
       claimers = Set.singleton bob
       settlers = Set.singleton bob
-      Claim.routeProviderCid = undefined
+      routeProviderCid = undefined
       settlementFactoryCid = undefined
       netInstructions = undefined
-
+  -}
+  
   (newBondOpt, effectCids) <- submit bank $
     exerciseCmd rule Lifecycle.Evolve with
       eventCid = updateEventCid
@@ -171,4 +181,3 @@ runBondStep () = do
     Some b -> debug $ show b
 
   return ()
--}
