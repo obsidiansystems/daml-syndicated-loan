@@ -52,6 +52,9 @@ data LedgerParties = LedgerParties with
     fed_ingrid : Party
   deriving (Show, Eq, Ord)
 
+-- | Test that does not exercise the lending workflow as such, but
+-- exercises transfers on the ledger to help us estimate throughput
+-- of our settlement strategy.
 perfTest : LedgerParties -> Script ()
 perfTest LedgerParties{..} = do
     let instrumentId = Id "USD"
@@ -123,10 +126,16 @@ initialTest parties = do
   originationData <- origination parties stuff
   servicing parties originationData
 
+-- | Information required for denominating the loans
+-- and settling payments.
 data PreOriginationStuff = PreOriginationStuff with
   usdInstrument : InstrumentKey
   ledgerAccounts : LedgerAccounts
 
+-- | Only a subset of the parties involved need to have accounts
+-- to exercise the lifecycle of the loan.
+-- In particular, the depository/issuer, and underwriters do not
+-- need accounts.
 data LedgerAccounts = LedgerAccounts with
     aliceAccount : AccountKey
     bobAccount : AccountKey
@@ -136,7 +145,11 @@ data LedgerAccounts = LedgerAccounts with
     hortenseAccount : AccountKey
   deriving (Show, Eq, Ord)
 
--- Pre-origination
+-- Pre-origination set-up script that creates:
+-- - the asset in which the loans will be denominated
+-- - the issuer and depository for the asset (for simplicity, they are the same party)
+-- - the accounts for the agents, lenders, and borrowers
+-- - initial assets for the lenders
 preOrigination : LedgerParties -> Script PreOriginationStuff
 preOrigination LedgerParties{..} = do
     -- Create the Fed
@@ -304,6 +317,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
+  -- Settlement
   now <- getTime
   let (bond, amount) = loanAgreementToBondAndAmount now undefined loanAgreement
   (bondRef,bondCid) <- createBond bond
