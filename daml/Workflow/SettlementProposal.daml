@@ -12,7 +12,7 @@ import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
 
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (I)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (I)
-import Daml.Finance.Interface.Settlement.Types (Step(..))
+import Daml.Finance.Interface.Settlement.Types (RoutedStep, Step(..))
 import DA.Set (singleton)
 
 import Workflow.Origination
@@ -32,33 +32,7 @@ template SettlementProposal
         let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         if (sort sigAccumulator) == (sort lendersAndBorrowers) then do
-          -- TODO: DRY
-          -- Settlement of lenders
-          let lenderSteps = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
-                Step with sender = lender; receiver = loan.agent; quantity = Quantity loan.loanTerms.instrument investAmount
-          -- Settlement of borrower
-              borrowerStep =
-                Step with sender = loan.agent; receiver = loan.borrower; quantity = Quantity loan.loanTerms.instrument loan.loanTerms.amount
-
-          -- Discover settlement routes for the steps
-          routedSteps <- exercise routeProviderCid RouteProvider.Discover with
-            discoverors = S.fromList $ loan.agent::lendersAndBorrowers
-            contextId = None
-            steps = borrowerStep::lenderSteps
-
-          -- Instruct settlement
-          (containerCid, [recInstructionCid, payInstructionCid]) <-
-            exercise settlementFactoryCid Settlement.Instruct with
-              instructors = S.fromList $ loan.agent::lendersAndBorrowers
-              settlers = singleton loan.agent
-              id = Id id
-              description = "Settlement for " <> id
-              contextId = None
-              routedSteps
-              settlementTime = None -- i.e., immediate settlement
-
-          return $ Some (containerCid, recInstructionCid, payInstructionCid)
-
+          settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid
         else do
           create this with sigAccumulator = loan.borrower::sigAccumulator
           return None
@@ -70,32 +44,7 @@ template SettlementProposal
         let lendersAndBorrowers : [Party] = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts) then do
-          -- TODO: DRY
-          -- Settlement of lenders
-          let lenderSteps = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
-                Step with sender = lender; receiver = loan.agent; quantity = Quantity loan.loanTerms.instrument investAmount
-          -- Settlement of borrower
-              borrowerStep =
-                Step with sender = loan.agent; receiver = loan.borrower; quantity = Quantity loan.loanTerms.instrument loan.loanTerms.amount
-
-          -- Discover settlement routes for the steps
-          routedSteps <- exercise routeProviderCid RouteProvider.Discover with
-            discoverors = S.fromList $ loan.agent::lendersAndBorrowers
-            contextId = None
-            steps = borrowerStep::lenderSteps
-
-          -- Instruct settlement
-          (containerCid, [recInstructionCid, payInstructionCid]) <-
-            exercise settlementFactoryCid Settlement.Instruct with
-              instructors = S.fromList $ loan.agent::lendersAndBorrowers
-              settlers = singleton loan.agent
-              id = Id id
-              description = "Settlement for " <> id
-              contextId = None
-              routedSteps
-              settlementTime = None -- i.e., immediate settlement
-
-          return $ Some (containerCid, recInstructionCid, payInstructionCid)
+          settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid
 
         -- add the current choice controller to the list of acquired signatures
         else do
@@ -111,3 +60,42 @@ template SettlementProposal
       -- ^ Withdraw the request.
       controller loan.agent
       do pure ()
+
+-- settleTransactions :: LoanAgreement -> [Party] -> Text -> RouteProvider -> _
+settleTransactions :
+  (HasField "agent" r1 Party
+  , HasField "amount" r2 (Numeric 10)
+  , HasField "borrower" r1 Party
+  , HasField "instrument" r2 InstrumentKey
+  , HasField "loanTerms" r1 r2
+  , HasField "participantsWithAmounts" r1 (Map.Map Party (Numeric 10))
+  , HasExercise t1 RouteProvider.Discover [RoutedStep]
+  , HasExercise t2 Settlement.Instruct (a, [c])
+  )
+  => r1 -> [Party] -> Text -> ContractId t1 -> ContractId t2 -> Update (Optional (a, c, c))
+settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid = do
+  -- Settlement of lenders
+  let lenderSteps = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
+        Step with sender = lender; receiver = loan.agent; quantity = Quantity loan.loanTerms.instrument investAmount
+  -- Settlement of borrower
+      borrowerStep =
+        Step with sender = loan.agent; receiver = loan.borrower; quantity = Quantity loan.loanTerms.instrument loan.loanTerms.amount
+
+  -- Discover settlement routes for the steps
+  routedSteps <- exercise routeProviderCid RouteProvider.Discover with
+    discoverors = S.fromList $ loan.agent::lendersAndBorrowers
+    contextId = None
+    steps = borrowerStep::lenderSteps
+
+  -- Instruct settlement
+  (containerCid, [recInstructionCid, payInstructionCid]) <-
+    exercise settlementFactoryCid Settlement.Instruct with
+      instructors = S.fromList $ loan.agent::lendersAndBorrowers
+      settlers = singleton loan.agent
+      id = Id id
+      description = "Settlement for " <> id
+      contextId = None
+      routedSteps
+      settlementTime = None -- i.e., immediate settlement
+
+  return $ Some (containerCid, recInstructionCid, payInstructionCid)
