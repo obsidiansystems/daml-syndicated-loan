@@ -36,6 +36,7 @@ import qualified Daml.Finance.Interface.Holding.Base as B
 import Workflow.SettlementProposal
 import Workflow.Transfer qualified as Transfer
 import Workflow.Util
+import qualified Daml.Finance.Interface.Settlement.Instruction as Instruction
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -92,10 +93,10 @@ perfTest LedgerParties{..} = do
             version = instrumentVersion
           amount = 100000.0
     xv <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
-    SplitResult{..} <- submit borrower_alice do 
+    SplitResult{..} <- submit borrower_alice do
       exerciseCmd (coerceInterfaceContractId @Fungible xv) Fungible.Split with
         amounts = replicate 100 5.0
-    
+
     accountkeys <- forA [1..100] $ \x -> do
       requestCid <- submit lender_hortense do
         createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
@@ -112,7 +113,7 @@ perfTest LedgerParties{..} = do
     let xd = zip accountkeys splitCids
     forA_ xd $ \(a, b) -> do
       x <- submit lender_hortense $ do
-        createCmd Transfer.Request with 
+        createCmd Transfer.Request with
           receiverAccount = a
           instrument = usdInstrument
           currentOwner = borrower_alice
@@ -234,7 +235,7 @@ preOrigination LedgerParties{..} = do
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
         observers = []
-    
+
     -- ...for Charlie's agency
     charlieRequestCid <- submit agent_charlie do
       createCmd CreateAccount.Request with owner = agent_charlie; custodian = fed_ingrid
@@ -409,7 +410,7 @@ acceptLoanProposal borrower offerCid = do
 -- TODO: This will take a LoanAgreement once we have multi-party signing implemented
 servicing : LedgerParties -> Origination -> Script ()
 servicing LedgerParties{..} origination = do
-  
+
   pure ()
 
 settleLoan : LedgerParties -> LoanAgreement -> Script ()
@@ -418,7 +419,7 @@ settleLoan LedgerParties {..} loanAgreement = do
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
       createCmd SingleCustodian.SingleCustodian with
         provider = fed_ingrid
-        observers = S.fromList [borrower_alice, borrower_bob]
+        observers = S.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
         custodian = fed_ingrid
 
   -- 2. Create Settlement Factory
@@ -427,10 +428,8 @@ settleLoan LedgerParties {..} loanAgreement = do
       provider = fed_ingrid
       observers = S.fromList [borrower_bob, borrower_alice]
 
-  -- TODO: This is the part where you begin to construct
-  -- 1: All lenders send funds to Agent
-  -- 2: Agent sends funds to borrower
 
+  -- 3. Generate Settlement Proposal
   settlementProposalCid <- submit agent_charlie do
     createCmd SettlementProposal with
       loan = loanAgreement
@@ -438,13 +437,25 @@ settleLoan LedgerParties {..} loanAgreement = do
       routeProviderCid
       settlementFactoryCid
 
+  -- Get sig of participating lender
   _ <- submit lender_gary do
     exerciseCmd settlementProposalCid $ Accept_Lender lender_gary
 
+  -- Get sig of participating lender
   _ <- submit lender_hortense do
     exerciseCmd settlementProposalCid $ Accept_Lender lender_hortense
 
-  settlementRes <- submit borrower_alice do
+  -- Get sig of participating borrower, all signatures should have been accumulated, tx instructions should be produced
+  -- TODO: Should case to ensure it actually is 'Some' instead of 'None'
+  Some (containerCid, instructionCids) <- submit borrower_alice do
     exerciseCmd settlementProposalCid Accept_Borrower
+
+  -- Prepare to construct Allocate instructions
+  let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids
+
+  -- (allocatedSettleInstructionCid1, _) <- submit agent_charlie do
+  --    exerciseCmd instructionCid1 Instruction.Allocate with
+  --      actors = S.singleton agent_charlie
+  --      allocation = Pledge aliceHoldingCid
 
   return ()
