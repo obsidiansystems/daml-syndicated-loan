@@ -584,8 +584,6 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   let partyHoldingsMap = Map.fromList
         [ (lender_gary, preOriginationStuff.garyCashHoldingCid)
         , (lender_hortense, preOriginationStuff.hortenseCashHoldingCid)
-        -- , (borrower_alice, aliceBondHoldingCid)
-        , (borrower_alice, origination.aliceBondHoldingCid)
         ]
 
   -- Have each party pledge where funds should be coming from
