@@ -1,7 +1,8 @@
 {
   "url": "ssh://git@code.obsidian.systems/daml/nix-daml-sdk",
-  "rev": "a91251cc085dea9013eda692357d5f62a45a60f5",
-  "sha256": "0m9g9i9x6xwzxnfmyg9mili11sl1xa8rlxmjd4lvz7njvyw3d283",
+  "rev": "c7f18a8f6464b0e47eb66308d387d2574fcd789a",
+  "sha256": "05hwcjfsin4fy68krb9qk30lfnaw33lx9nrhsv6vj9d8j3lzg2gc",
   "private": true,
-  "fetchSubmodules": false
+  "fetchSubmodules": false,
+  "branch": "master"
 }
