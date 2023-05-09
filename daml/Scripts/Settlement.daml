@@ -4,8 +4,7 @@ import Daml.Script
 
 -- INTERFACE DEPENDENCIES --
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
-import Daml.Finance.Interface.Instrument.Base.Instrument qualified as Instrument
-import Daml.Finance.Interface.Types.Common.Types (Parties, AccountKey, Id(..), InstrumentKey(..))
+import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
 
 -- IMPLEMENTATION DEPENDENCIES --
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument qualified as FR
@@ -14,7 +13,6 @@ import Daml.Finance.Instrument.Bond.FixedRate.Instrument qualified as FR
 import Scripts.Transfer (TransferState(..), runTransfer)
 
 import DA.Date (Month(..), date, toGregorian)
-import DA.Map qualified as M (fromList)
 import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
 import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (Period(..), PeriodEnum(..), RollConventionEnum(..))
@@ -25,13 +23,15 @@ import Daml.Finance.Interface.Types.Date.Classes
 
 import Workflow.Servicing (clockUpdateEvent)
 import qualified DA.Set as Set
-import Daml.Finance.Claims.Lifecycle.Rule as Lifecycle (Rule(..))
+import Daml.Finance.Lifecycle.Rule.Claim as Claim
+import Daml.Finance.Interface.Lifecycle.Rule.Claim as ClaimI
+--import Daml.Finance.Claims.Lifecycle.Rule as Lifecycle (Rule(..))
 import qualified Daml.Finance.Interface.Lifecycle.Rule.Lifecycle as Lifecycle
 import qualified DA.Map as Map
 import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
 import DA.Time (days, time)
-import Daml.Finance.Interface.Instrument.Base.Instrument (scale)
 import Workflow.Util
+import qualified Daml.Finance.Claims.Lifecycle.Rule as Lifecycle
 
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
@@ -76,10 +76,8 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
     -- CREATE_PERIODIC_SCHEDULE_END
     periodicSchedule
 
-
-
-run : () -> Script ()
-run () = do
+run : Script ()
+run = do
   runBondStep ()
   return ()
 
@@ -138,9 +136,9 @@ runBondStep () = do
       calendarDataProvider = bank
       dayCountConvention = Act365Fixed
       currency = usdInstrument
-      lastEventTimestamp = toUTCTime (DateClock.Unit (date 2028 Apr 10))
+      lastEventTimestamp = toUTCTime (DateClock.Unit (date 2000 Apr 10))
 
-  bondRef <- createReference bondInstrumentCid bank bank (Map.empty)
+  bondRef <- createReferenceS bondInstrumentCid bank bank (Map.empty)
 
   passTime (days 30)
   
@@ -160,6 +158,17 @@ runBondStep () = do
       lifecycler = agent
       id = Id "LifecycleRule"
       description = "Rule to lifecycle the bond instrument"
+
+  {-
+  rule <- fmap (toInterfaceContractId @ClaimI.I) $
+    submit agent $ createCmd $ Claim.Rule with
+      providers = Set.fromList [agent, bob]
+      claimers = Set.singleton bob
+      settlers = Set.singleton bob
+      routeProviderCid = undefined
+      settlementFactoryCid = undefined
+      netInstructions = undefined
+  -}
   
   (newBondOpt, effectCids) <- submit bank $
     exerciseCmd rule Lifecycle.Evolve with

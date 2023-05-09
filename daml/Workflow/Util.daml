@@ -6,21 +6,48 @@ import DA.Map (Map)
 import Daml.Finance.Interface.Instrument.Base.Instrument qualified as Instrument
 import Daml.Finance.Interface.Types.Common.Types (Parties, InstrumentKey(..))
 import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
+import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument)
 
-import Workflow.Origination
+type BondInstrument = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 
-createReference : ContractId BaseInstrument.I -> Party -> Party -> Map Text Parties ->
-  Script InstrumentKey
+createReference : ContractId BaseInstrument.I -> Party -> Party -> Map Text Parties -> Update InstrumentKey
 createReference cid depository issuer observers = do
+  instrumentView <- exercise cid BaseInstrument.GetView with viewer = issuer
+  let ref = BaseInstrument.Reference with instrumentView; cid; observers
+  r <- create ref
+  return (key ref)
+
+createReferenceS : ContractId BaseInstrument.I -> Party -> Party -> Map Text Parties ->
+  Script InstrumentKey
+createReferenceS cid depository issuer observers = do
   instrumentView <- submitMulti [depository, issuer] [] do
     exerciseCmd cid BaseInstrument.GetView with viewer = issuer
   let ref = BaseInstrument.Reference with instrumentView; cid; observers
   submitMulti [depository, issuer] [] do createCmd ref
   pure $ key ref
 
-createBond : Bond -> Script (InstrumentKey, ContractId BaseInstrument.I)
-createBond bond = do
-  bondCid <- toInterfaceContractId @BaseInstrument.I <$> submit bond.depository do
-    createCmd bond
-  bondRef <- createReference bondCid bond.depository bond.issuer bond.observers
-  return (bondRef, bondCid)
+data Bond = Bond
+  with
+    instrument : BondInstrument
+    reference : InstrumentKey
+    cid : ContractId (BaseInstrument.I)
+  deriving (Eq, Show)
+
+createBond : BondInstrument -> Update Bond
+createBond instrument = do
+  cid <- toInterfaceContractId @BaseInstrument.I <$> create instrument
+  reference <- createReference cid instrument.depository instrument.issuer instrument.observers
+  return Bond with
+    instrument
+    reference
+    cid
+
+createBondS : BondInstrument -> Script Bond
+createBondS instrument = do
+  cid <- toInterfaceContractId @BaseInstrument.I <$> submit instrument.depository do
+    createCmd instrument
+  reference <- createReferenceS cid instrument.depository instrument.issuer instrument.observers
+  return Bond with
+    instrument
+    reference
+    cid
