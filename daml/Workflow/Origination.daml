@@ -1,18 +1,15 @@
 module Workflow.Origination where
 
-import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(..))
-import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFrequency(..), SchedulePeriod(..), PeriodicSchedule(..))
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(..), BusinessDayAdjustment(..))
+import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFrequency(..), PeriodicSchedule(..))
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
 import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
 import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(Act360))
 import DA.Map (Map)
 import qualified DA.Map as Map
 import qualified DA.Set as Set
-import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(NoRollConvention), Period(..))
 import DA.Date (addDays, toDateUTC)
-import DA.Set (Set)
-import DA.Assert
 
 type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 
@@ -240,6 +237,7 @@ data LoanTerms = LoanTerms with
     -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
       deriving (Eq, Show)
 
+-- TODO: Make this use Loan Terms and check equality of the terms instead of each individual field
 template AcceptedLoan
   with
     agent : Party
