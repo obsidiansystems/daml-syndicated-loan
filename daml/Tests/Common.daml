@@ -286,7 +286,9 @@ data Origination = Origination with
   loanAgreement : LoanAgreement
   loanAgreementCid : ContractId LoanAgreement
   bond : Bond
-  aliceBondAccountCid : AccountKey
+  aliceBondAccountKey : AccountKey
+  garyBondAccountKey : AccountKey
+  garyBondHoldingKey : ContractId B.I
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
@@ -344,7 +346,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
       custodian = fed_ingrid
       owner = borrower_alice
 
-  aliceBondAccountCid <- submit fed_ingrid do
+  aliceBondAccountKey <- submit fed_ingrid do
     exerciseCmd aliceAccountRequestCid CreateAccount.Accept with
         label = "AliceBond@Bank"
         description = "Account for Alice's Bond at Bank"
@@ -358,7 +360,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
       instrument = bond.reference
       amount = loanAgreement.loanTerms.amount
   
-  aliceBondHoldingCid <- submit fed_ingrid do
+  aliceBondHoldingKey <- submit fed_ingrid do
     exerciseCmd aliceBondRequestCid CreditAccount.Accept
 
   garyAccountRequestCid <- submit lender_gary do
@@ -366,7 +368,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
       custodian = fed_ingrid
       owner = lender_gary
 
-  garyBondAccountCid <- submit fed_ingrid do
+  garyBondAccountKey <- submit fed_ingrid do
     exerciseCmd garyAccountRequestCid CreateAccount.Accept with
         label = "GaryBond@Bank"
         description = "Account for Gary's holding of Alice's Bond at Bank"
@@ -376,20 +378,23 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
 
   bondTransferReq <- submit lender_gary do
     createCmd Transfer.Request with
-      receiverAccount = garyBondAccountCid
+      receiverAccount = garyBondAccountKey
       instrument = bond.reference
       amount = loanAgreement.loanTerms.amount
       currentOwner = borrower_alice
 
-  bondTransfer <- submitMulti [borrower_alice,lender_gary] [] do
+  garyBondHoldingKey <- submitMulti [borrower_alice,lender_gary] [] do
     exerciseCmd bondTransferReq Transfer.Accept with
-      holdingCid = aliceBondHoldingCid
+      holdingCid = aliceBondHoldingKey
 
   pure Origination with
     loanAgreement
     loanAgreementCid
     bond
-    aliceBondAccountCid
+    aliceBondAccountKey
+    garyBondAccountKey
+    garyBondHoldingKey
+
 
 type Amount = Decimal
 
@@ -481,7 +486,7 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
           amount = acceptance.amount
           rate = acceptance.rate
           durationYears = 10 -- TODO: Get this
-
+          
   submit agent $ createCmd PendingLoanAgreement with
     agreement
     signed = []
