@@ -425,23 +425,23 @@ servicing LedgerParties{..} origination = do
   -}
   pure ()
 
-settleLoan : LedgerParties -> LoanAgreement -> Script ()
-settleLoan LedgerParties {..} loanAgreement = do
-  -- 1. Create Route Provider
+settleLoan : LedgerParties -> PreOriginationStuff -> LoanAgreement -> Script ()
+settleLoan LedgerParties {..} preOriginationStuff loanAgreement = do
+  -- Create Route Provider
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
       createCmd SingleCustodian.SingleCustodian with
         provider = fed_ingrid
         observers = S.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
         custodian = fed_ingrid
 
-  -- 2. Create Settlement Factory
+  -- Create Settlement Factory
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit fed_ingrid do
     createCmd Factory with
       provider = fed_ingrid
       observers = S.fromList [borrower_bob, borrower_alice]
 
 
-  -- 3. Generate Settlement Proposal
+  -- Generate Settlement Proposal
   settlementProposalCid <- submit agent_charlie do
     createCmd SettlementProposal with
       loan = loanAgreement
@@ -469,8 +469,11 @@ settleLoan LedgerParties {..} loanAgreement = do
     pure (icid, iv)
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
-  -- TODO: initiate Map Party (ContractId Holding)
-  let partyHoldingsMap = Map.empty
+  -- initiate Map Party (ContractId Holding)
+  let partyHoldingsMap = Map.fromList
+        [ (lender_gary, preOriginationStuff.garyCashHoldingCid)
+        , (lender_hortense, preOriginationStuff.hortenseCashHoldingCid)
+        ]
 
   -- Have each party pledge where funds should be coming from
   allocatedSettleInstructions <- forA routedSteps $ \(icid, routedStep) -> do
@@ -481,8 +484,15 @@ settleLoan LedgerParties {..} loanAgreement = do
         allocation = Pledge receiverHoldingCid
     return (routedStep.receiver, allocInstructions)
 
-  -- TODO: initiate Map Party AccountKey
-  let partyAccountMap = Map.empty
+  -- initiate Map Party AccountKey
+  let partyAccountMap = Map.fromList
+        [ (borrower_alice, preOriginationStuff.ledgerAccounts.aliceAccount)
+        , (borrower_bob, preOriginationStuff.ledgerAccounts.bobAccount)
+        , (lender_gary, preOriginationStuff.ledgerAccounts.garyAccount)
+        , (lender_hortense, preOriginationStuff.ledgerAccounts.hortenseAccount)
+        , (agent_charlie, preOriginationStuff.ledgerAccounts.charlieAccount)
+        , (agent_debbie, preOriginationStuff.ledgerAccounts.debbieAccount)
+        ]
 
   -- Have each party approve of transaction instructions
   approvedSettleInstuctionCids <- forA allocatedSettleInstructions $ \(approvingParty, (allocInstructionsCid, _)) -> submit approvingParty do
