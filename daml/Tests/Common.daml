@@ -141,6 +141,8 @@ initialTest parties = do
 -- | Information required for denominating the loans
 -- and settling payments.
 data PreOriginationStuff = PreOriginationStuff with
+  accountFactoryCid : ContractId Account.F
+  holdingFactoryCid : ContractId Holding.F
   usdInstrument : InstrumentKey
   ledgerAccounts : LedgerAccounts
   hortenseCashHoldingCid : ContractId B.I
@@ -273,6 +275,8 @@ preOrigination LedgerParties{..} = do
 
     let ledgerAccounts = LedgerAccounts with ..
     return $ PreOriginationStuff with
+      accountFactoryCid
+      holdingFactoryCid
       usdInstrument
       ledgerAccounts
       hortenseCashHoldingCid
@@ -282,11 +286,9 @@ data Origination = Origination with
   loanAgreement : LoanAgreement
   loanAgreementCid : ContractId LoanAgreement
   bond : Bond
-  bondRef : InstrumentKey
-  bondCid : ContractId (BaseInstrument.I)
-  amount : Decimal
+  aliceBondAccountCid : AccountKey
 
-origination : LedgerParties -> PreOriginationStuff -> Script LoanAgreement
+origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
@@ -336,7 +338,58 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   (loanAgreementCid, bond) <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
-  pure loanAgreement
+  
+  aliceAccountRequestCid <- submit borrower_alice do
+    createCmd CreateAccount.Request with
+      custodian = fed_ingrid
+      owner = borrower_alice
+
+  aliceBondAccountCid <- submit fed_ingrid do
+    exerciseCmd aliceAccountRequestCid CreateAccount.Accept with
+        label = "AliceBond@Bank"
+        description = "Account for Alice's Bond at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
+
+  aliceBondRequestCid <- submit borrower_alice do
+    createCmd CreditAccount.Request with
+      account = ledgerAccounts.aliceAccount
+      instrument = bond.reference
+      amount = loanAgreement.loanTerms.amount
+  
+  aliceBondHoldingCid <- submit fed_ingrid do
+    exerciseCmd aliceBondRequestCid CreditAccount.Accept
+
+  garyAccountRequestCid <- submit lender_gary do
+    createCmd CreateAccount.Request with
+      custodian = fed_ingrid
+      owner = lender_gary
+
+  garyBondAccountCid <- submit fed_ingrid do
+    exerciseCmd garyAccountRequestCid CreateAccount.Accept with
+        label = "GaryBond@Bank"
+        description = "Account for Gary's holding of Alice's Bond at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
+
+  bondTransferReq <- submit lender_gary do
+    createCmd Transfer.Request with
+      receiverAccount = garyBondAccountCid
+      instrument = bond.reference
+      amount = loanAgreement.loanTerms.amount
+      currentOwner = borrower_alice
+
+  bondTransfer <- submitMulti [borrower_alice,lender_gary] [] do
+    exerciseCmd bondTransferReq Transfer.Accept with
+      holdingCid = aliceBondHoldingCid
+
+  pure Origination with
+    loanAgreement
+    loanAgreementCid
+    bond
+    aliceBondAccountCid
 
 type Amount = Decimal
 
