@@ -9,6 +9,7 @@ import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvide
 import qualified DA.Set as S
 
 import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
+import qualified Daml.Finance.Interface.Settlement.Batch as Batch
 
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (I)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (I)
@@ -25,10 +26,10 @@ template SettlementProposal
     settlementFactoryCid : ContractId Settlement.F
     bond : InstrumentKey
   where
-    signatory loan.agent::sigAccumulator
+    signatory loan.borrower::sigAccumulator
     observer loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
 
-    choice Accept_Borrower : Either (ContractId SettlementProposal) (ContractId Batch.I, [ContractId Instruction.I])
+    choice Accept_Borrower : Either (ContractId SettlementProposal) (ContractId SettlementProposal, ContractId Batch.I, [ContractId Instruction.I])
       controller loan.borrower
       do
         let lenders = (map fst $ Map.toList loan.participantsWithAmounts)
@@ -36,12 +37,14 @@ template SettlementProposal
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         debug $ show lendersAndBorrowers
         if (sort sigAccumulator) == (sort lenders) then do
-          settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
+          (batchCid, settleInstructions) <- settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
+          updatedContract <- create this with sigAccumulator = loan.borrower::sigAccumulator
+          return $ Right (updatedContract, batchCid, settleInstructions)
         else do
           updatedContract <- create this with sigAccumulator = loan.borrower::sigAccumulator
           return $ Left updatedContract
 
-    choice Accept_Lender : Either (ContractId SettlementProposal) (ContractId Batch.I, [ContractId Instruction.I])
+    choice Accept_Lender : Either (ContractId SettlementProposal) (ContractId SettlementProposal, ContractId Batch.I, [ContractId Instruction.I])
       with
         currLender : Party
       controller currLender
@@ -51,7 +54,9 @@ template SettlementProposal
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         debug $ show lendersAndBorrowers
         if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts) then do
-          settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
+          (batchCid, settleInstructions) <- settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
+          updatedContract <- create this with sigAccumulator = currLender::sigAccumulator
+          return $ Right (updatedContract, batchCid, settleInstructions)
 
         -- add the current choice controller to the list of acquired signatures
         else do
@@ -65,8 +70,16 @@ template SettlementProposal
 
     choice Withdraw : ()
       -- ^ Withdraw the request.
-      controller loan.agent
+      controller loan.borrower
       do pure ()
+    choice ExecuteSettlement : ()
+      with
+        batchCid : ContractId Batch.I
+      controller loan.borrower
+      do
+        exercise batchCid Batch.Settle with
+          actors = S.singleton loan.borrower
+        return ()
 
 settleTransactions :
   (HasField "agent" r1 Party
@@ -84,7 +97,7 @@ settleTransactions :
   -> ContractId t1
   -> ContractId t2
   -> InstrumentKey -- ^ Bond
-  -> Update (Either (ContractId SettlementProposal) (a , [c]))
+  -> Update (a , [c])
 settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bondInstrumentKey = do
   -- Settlement of lenders (USD)
   let stepsUsd = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
@@ -101,18 +114,16 @@ settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactor
 
   -- Discover settlement routes for the steps
   routedSteps <- exercise routeProviderCid RouteProvider.Discover with
-    discoverors = S.fromList $ loan.agent::lendersAndBorrowers
+    discoverors = S.fromList $ lendersAndBorrowers
     contextId = None
     steps = stepsUsd ++ stepsBond
 
   -- Instruct settlement
-  instructRes <- exercise settlementFactoryCid Settlement.Instruct with
-      instructors = S.fromList $ loan.agent::lendersAndBorrowers
-      settlers = singleton loan.agent
+  exercise settlementFactoryCid Settlement.Instruct with
+      instructors = S.fromList $ lendersAndBorrowers
+      settlers = singleton loan.borrower
       id = Id id
       description = "Settlement for " <> id
       contextId = None
       routedSteps
       settlementTime = None -- i.e., immediate settlement
-
-  return $ Right instructRes

@@ -534,7 +534,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       observers = S.fromList [borrower_bob, borrower_alice]
 
   -- Generate Settlement Proposal
-  settlementProposalCid <- submit agent_charlie do
+  settlementProposalCid <- submit borrower_alice do
     createCmd SettlementProposal with
       loan = origination.loanAgreement
       sigAccumulator = []
@@ -568,14 +568,14 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   eitherUpdatedContractOrBatchInstructions <- submit borrower_alice do
     exerciseCmd settlementProposalCid3 Accept_Borrower
 
-  (batchCid, instructionCids) <- case eitherUpdatedContractOrBatchInstructions of
+  (allSignatureSettlementCid, batchCid, instructionCids) <- case eitherUpdatedContractOrBatchInstructions of
     Left err -> fail $ "All signatures should be present " <> (show err)
     Right batchInstructions -> return batchInstructions
 
   -- Prepare to construct Allocate instructions
   -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids
   instructionViews <- forA instructionCids $ \icid -> do
-    iv <- submit agent_charlie $ exerciseCmd icid Settlement.I.GetView with viewer = agent_charlie
+    iv <- submit borrower_alice $ exerciseCmd icid Settlement.I.GetView with viewer = borrower_alice
     pure (icid, iv)
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
@@ -639,10 +639,15 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       actors = S.singleton approvingParty
       approval = TakeDelivery approvingPartyAccount
 
+  -- WARN: This can only be used in scripts, not on DAML Hub
   -- Settle batched transactions atomically
-  holdingCids <- submitMulti [agent_charlie, borrower_alice, lender_gary, lender_hortense] [] do
-      exerciseCmd batchCid Batch.Settle with
-        actors = S.singleton agent_charlie
+  -- holdingCids <- submitMulti [agent_charlie, borrower_alice, lender_gary, lender_hortense] [] do
+  --     exerciseCmd batchCid Batch.Settle with
+  --       actors = S.singleton agent_charlie
+
+  -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
+  _ <- submit borrower_alice do
+    exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
   return ()
 
