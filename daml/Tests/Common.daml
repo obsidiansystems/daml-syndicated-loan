@@ -8,7 +8,8 @@ module Tests.Common where
 
 import DA.Action
 import DA.Foldable
-import DA.Map (empty)
+import DA.List qualified as L
+import DA.Map (Map, empty)
 import qualified DA.Map as Map
 import qualified DA.Set as S
 import Daml.Script
@@ -294,11 +295,12 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
       loanApplication = LoanApplication with
         borrower = borrower_alice
         agent = agent_charlie
-        instrument = usdInstrument
-        amount
-        maxInterestRate = rate
-        prospectus = "To test the syndicated loans framework :)"
-        durationYears = 10
+        applicationData = LoanApplicationData with
+          instrument = usdInstrument
+          amount
+          maxInterestRate = rate
+          prospectus = "To test the syndicated loans framework :)"
+          durationYears = 10
   -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplication
   -- Agent coordinating the lending first asks an underwriter for a report
@@ -317,19 +319,21 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     Some fundingInterest <- queryContractId agent_charlie cid
     pure (cid, fundingInterest)
   -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
-  (rate, selectedFundingInterests) <- selectFundingInterests fundingInterests
-  loanProposal <- submit agent_charlie $ createLoanProposal application uuid rate
+  let FundingSelection{..} = selectFundingInterests loanApplication fundingInterests
+  loanProposal <- submit agent_charlie $ createLoanProposal application uuid fundingSelection_ratePerAnnum
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
-  pendingAgreement <- createPendingLoanAgreement agent_charlie acceptedLoan selectedFundingInterests
+  pendingAgreement <- createPendingLoanAgreement agent_charlie acceptedLoan fundingSelection_selected
   borrowerSigned <- submit agent_charlie $ do
     exerciseCmd acceptedLoan $ AcceptedLoan_SignAgreement with
       agreementCid = pendingAgreement
   lendersSigned <- foldlA
     (\agreementCid fundingInterestCid -> submit agent_charlie $ exerciseCmd fundingInterestCid FundingInterest_SignAgreement with agreementCid)
     borrowerSigned
-    selectedFundingInterests
+    (Map.keys fundingSelection_selected)
+  -- Agent declines leftover funding interests
+  submit agent_charlie $ forA_ fundingSelection_declined $ \declinedCid -> exerciseCmd declinedCid FundingInterest_Decline
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   (loanAgreementCid, bond) <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
@@ -355,12 +359,8 @@ makeFundingRequest agent amount underwriteCid lender = do
     Some underwrite <- queryContractId agent underwriteCid
     disclosedUnderwriting <- submit agent $ exerciseCmd underwriteCid UnderwritingResult_Disclose with
         disclose_to = lender
-    submit agent $ createCmd FundingRequest with
-        agent
-        uuid = "golden" -- TODO: Thread these through
-        underwrite = disclosedUnderwriting
+    submit agent $ exerciseCmd disclosedUnderwriting MakeFundingRequest with
         participant = lender
-        totalApplicationAmount = amount
 
 getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
 getFundingRequestsFor lender = query @FundingRequest lender
@@ -376,20 +376,51 @@ makeUnderwritingRequest underwriter uuid applicationCid = exerciseCmd applicatio
   underwriter
   uuid
 
--- TODO: combine the list of FundingInterest instead of just taking the first element
-selectFundingInterests : [(ContractId FundingInterest, FundingInterest)] -> Script (RatePerAnnum, [ContractId FundingInterest])
-selectFundingInterests ((offerCid, offer)::interests) = pure (offer.rate, [offerCid])
-selectFundingInterests [] = fail "No interests to fund loan"
+data FundingSelection = FundingSelection
+  with
+    fundingSelection_ratePerAnnum : RatePerAnnum
+    fundingSelection_selected : Map (ContractId FundingInterest) Amount
+    fundingSelection_declined : [ContractId FundingInterest]
+  deriving (Eq, Ord, Show)
 
-createPendingLoanAgreement : Party -> ContractId AcceptedLoan -> [ContractId FundingInterest] -> Script (ContractId PendingLoanAgreement)
-createPendingLoanAgreement agent acceptanceCid fundingCids = do
+selectFundingInterests : LoanApplication -> [(ContractId FundingInterest, FundingInterest)] -> FundingSelection
+selectFundingInterests _ [] = error "No interests to fund loan"
+selectFundingInterests application interests =
+  let sortedInterests = flip L.sortBy interests $ \(_, fi_a) (_, fi_b) -> compare fi_a.rate fi_b.rate
+      (bestRate, book, leftover) = buildBook application (RatePerAnnum 0.0) 0.0 empty interests
+   in FundingSelection with
+        fundingSelection_ratePerAnnum = bestRate
+        fundingSelection_selected = book
+        fundingSelection_declined = leftover
+
+-- | Given a *SORTED* list of funding interests, sorted from lowest to highest interest rate, gathers commitments
+-- until either the loan amount is satisfied, or the loan cannot be constructed for want of funding at an acceptable
+-- rate of interest.
+buildBook
+  : LoanApplication
+  -> RatePerAnnum
+  -> Amount
+  -> Map (ContractId FundingInterest) Amount
+  -> [(ContractId FundingInterest, FundingInterest)]
+  -> (RatePerAnnum, Map (ContractId FundingInterest) Amount, [ContractId FundingInterest])
+buildBook application _ _ _ [] = error "Not enough funding interest to construct loan"
+buildBook application currentInterest accumulatedAmount accumulatedBook ((fundingCid, funding)::fundings) = case funding.rate <= application.applicationData.maxInterestRate of
+    False -> error "Not enough funding interest below the maximum interest rate to construct loan"
+    True ->
+      let remainingRequiredFunding = application.applicationData.amount - accumulatedAmount
+       in case remainingRequiredFunding <= funding.amount of
+            True -> (funding.rate, Map.insertWith (+) fundingCid remainingRequiredFunding accumulatedBook, map fst fundings)
+            False -> buildBook application funding.rate (accumulatedAmount + funding.amount) (Map.insertWith (+) fundingCid funding.amount accumulatedBook) fundings
+
+createPendingLoanAgreement : Party -> ContractId AcceptedLoan -> Map (ContractId FundingInterest) Amount -> Script (ContractId PendingLoanAgreement)
+createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
   Some acceptance <- queryContractId agent acceptanceCid
-  lendersWithAmounts <- forA fundingCids $ \offerCid -> do
-    Some loanOffer <- queryContractId agent offerCid
-    pure (loanOffer.participant, loanOffer.amount)
+  participantsWithAmounts <- fmap Map.fromList $ forA (Map.toList lendersWithAmounts) $ \(cid, amt) -> do
+    Some funding <- queryContractId agent cid
+    pure (funding.participant, amt)
   let agreement = LoanAgreement with
         agent
-        participantsWithAmounts = Map.fromList lendersWithAmounts
+        participantsWithAmounts
         borrower = acceptance.borrower
         uuid = "golden" -- TODO: Thread these through
         prospectus = "uhhh" -- TODO: Get this
