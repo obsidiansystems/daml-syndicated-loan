@@ -274,11 +274,8 @@ data Origination = Origination with
   loanAgreement : LoanAgreement
   loanAgreementCid : ContractId LoanAgreement
   bond : Bond
-  bondRef : InstrumentKey
-  bondCid : ContractId (BaseInstrument.I)
-  amount : Decimal
 
-origination : LedgerParties -> PreOriginationStuff -> Script LoanAgreement
+origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
@@ -325,7 +322,10 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   (loanAgreementCid, bond) <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
-  pure loanAgreement
+  pure Origination with
+    loanAgreement
+    loanAgreementCid
+    bond
 
 type Amount = Decimal
 

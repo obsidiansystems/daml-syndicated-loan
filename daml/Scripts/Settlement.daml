@@ -33,6 +33,9 @@ import DA.Time (days, time)
 import Workflow.Util
 import qualified Daml.Finance.Claims.Lifecycle.Rule as Lifecycle
 
+import Tests.Common
+import Tests.IDE
+
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
   with
@@ -78,7 +81,9 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
 
 run : Script ()
 run = do
-  runBondStep ()
+  p <- createParties
+  po <- preOrigination p
+  runBondStep p po
   return ()
 
 -- | Test script that
@@ -87,8 +92,9 @@ run = do
 -- 3. credits a token holding to Alice in her bank account
 -- 4. atomically exchanges the token against the cash holding
 
-runBondStep : () -> Script ()
-runBondStep () = do
+runBondStep : LedgerParties -> PreOriginationStuff -> Script ()
+runBondStep LedgerParties{..} PreOriginationStuff{..} = do
+  {-
   -- Execute the `runTransfer` script. Bob now holds USD 1000 in his account.
   TransferState{alice
     , bank
@@ -99,22 +105,15 @@ runBondStep () = do
     , cashInstrument = usdInstrument
     , holdingFactoryCid
     , newHoldingCid = bobHoldingCid} <- runTransfer
+  -}
 
-  -- Bank creates a bond instrument
-  let
-    instrumentId = Id "BOND"
-    instrumentVersion = "0"
-    bondInstrument = InstrumentKey with
-      issuer = bank
-      depository = bank
-      id = instrumentId
-      version = instrumentVersion
+  orig <- origination (LedgerParties{..}) (PreOriginationStuff{..})
 
   setTime (time (date 2023 Apr 10) 0 0 0)
 
   let businessDayConvention = Cal.Following
       periodicSchedule = createPaymentPeriodicSchedule
-        (date 2023 May 10)
+        (date 2024 Apr 10)
         []
         businessDayConvention
         M
@@ -122,40 +121,22 @@ runBondStep () = do
         (date 2023 Apr 10)
         (date 2028 Apr 10)
 
-  bondInstrumentCid <- toInterfaceContractId @BaseInstrument.I <$> submit bank do
-    createCmd FR.Instrument with
-      depository = bank
-      issuer = bank
-      id = instrumentId
-      version = instrumentVersion
-      description = "Instrument representing a bond"
-      observers = Map.fromList [("Bob", Set.singleton bob)]
-      couponRate = 0.005
-      periodicSchedule
-      holidayCalendarIds = []
-      calendarDataProvider = bank
-      dayCountConvention = Act365Fixed
-      currency = usdInstrument
-      lastEventTimestamp = toUTCTime (DateClock.Unit (date 2000 Apr 10))
-
-  bondRef <- createReferenceS bondInstrumentCid bank bank (Map.empty)
-
-  passTime (days 30)
+  passTime (days 400)
   
-  let borrower = bob
-      lender = bank
-      agent = bank
-      today = date 2023 May 10
+  let borrower = borrower_bob
+      lender = lender_gary
+      agent = agent_charlie
+      today = date 2024 May 10
       parties = Set.fromList [borrower, lender, agent]
       updateEvent = clockUpdateEvent parties parties today
   updateEventCid <- fmap toInterfaceContractId $
-    submitMulti [agent,bob] [] $ do createCmd updateEvent
+    submitMulti [agent_charlie,borrower_bob,lender_gary] [] $ do createCmd updateEvent
   
   rule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
     submit agent $ createCmd $ Lifecycle.Rule with
-      providers = Set.singleton agent
-      observers = Map.fromList [("bob", Set.singleton bob), ("bank", Set.singleton bank)]
-      lifecycler = agent
+      providers = Set.singleton agent_charlie
+      observers = Map.fromList [("bob", Set.singleton borrower_bob), ("fed", Set.singleton fed_ingrid)]
+      lifecycler = agent_charlie
       id = Id "LifecycleRule"
       description = "Rule to lifecycle the bond instrument"
 
@@ -170,11 +151,11 @@ runBondStep () = do
       netInstructions = undefined
   -}
   
-  (newBondOpt, effectCids) <- submit bank $
+  (newBondOpt, effectCids) <- submit agent_charlie $
     exerciseCmd rule Lifecycle.Evolve with
       eventCid = updateEventCid
       observableCids = []
-      instrument = bondRef
+      instrument = orig.bond.reference
 
   case newBondOpt of
     None -> debug "NO NEW STUFF"
