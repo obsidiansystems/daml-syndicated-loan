@@ -11,18 +11,28 @@ import DA.Foldable
 import DA.Map (empty)
 import qualified DA.Map as Map
 import qualified DA.Set as S
+import Daml.Script
+
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import Daml.Finance.Interface.Holding.Fungible (Fungible, Fungible, SplitResult(SplitResult))
+import Daml.Finance.Interface.Holding.Transferable (Transfer)
+import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
+import Daml.Finance.Interface.Lifecycle.Rule.Claim as ClaimI
 import Daml.Finance.Interface.Types.Common.Types
+import Daml.Finance.Lifecycle.Rule.Claim as Claim
 import Daml.Finance.Settlement.Factory (Factory(..))
-import Daml.Script
 import qualified Daml.Finance.Holding.Fungible as FungibleX
+import qualified Daml.Finance.Holding.Fungible as FungibleX
+import qualified Daml.Finance.Interface.Holding.Base as B
+import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
 import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
 import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
 import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
 import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as SingleCustodian
+
 import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
@@ -268,7 +278,7 @@ data Origination = Origination with
   bondCid : ContractId (BaseInstrument.I)
   amount : Decimal
 
-origination : LedgerParties -> PreOriginationStuff -> Script Origination
+origination : LedgerParties -> PreOriginationStuff -> Script LoanAgreement
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
@@ -313,20 +323,9 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     borrowerSigned
     selectedFundingInterests
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
-  loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+  (loanAgreementCid, bond) <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
   pure loanAgreement
-  -- Construct a bond representing the payment structure of the loan
-  now <- getTime
-  let (bond, amount) = loanAgreementToBondAndAmount now usdInstrument loanAgreement
-  (bondRef,bondCid) <- createBond bond
-  return Origination with
-    loanAgreement
-    loanAgreementCid
-    bond
-    bondRef
-    bondCid
-    amount
 
 type Amount = Decimal
 
@@ -405,10 +404,18 @@ acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (Contract
 acceptLoanProposal borrower offerCid = do
   submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
--- TODO: This will take a LoanAgreement once we have multi-party signing implemented
 servicing : LedgerParties -> Origination -> Script ()
 servicing LedgerParties{..} origination = do
-
+  {-
+  rule <- fmap (toInterfaceContractId @ClaimI.I) $
+    submit agent $ createCmd $ Claim.Rule with
+      providers = Set.fromList [agent, bob]
+      claimers = bob
+      settlers = bob
+      Claim.routeProviderCid = routeProviderCid
+      settlementFactoryCid
+      netInstructions
+  -}
   pure ()
 
 settleLoan : LedgerParties -> LoanAgreement -> Script ()
