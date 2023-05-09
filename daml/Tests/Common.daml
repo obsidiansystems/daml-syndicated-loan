@@ -44,7 +44,7 @@ import Workflow.Transfer qualified as Transfer
 import Workflow.Util
 import qualified Daml.Finance.Interface.Settlement.Instruction as Instruction
 import qualified Daml.Finance.Interface.Settlement.Instruction as Settlement.I
-import Daml.Finance.Interface.Settlement.Types (TakeDelivery, Allocation(Pledge))
+import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge))
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
