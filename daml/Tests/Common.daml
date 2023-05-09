@@ -43,7 +43,7 @@ import Workflow.SettlementProposal
 import Workflow.Transfer qualified as Transfer
 import Workflow.Util
 import qualified Daml.Finance.Interface.Settlement.Instruction as Instruction
-import Daml.Finance.Interface.Settlement.Instruction (GetView(GetView))
+import qualified Daml.Finance.Interface.Settlement.Instruction as Settlement.I
 import Daml.Finance.Interface.Settlement.Types (Allocation(Pledge))
 
 -- | Parties representing various agents in the syndicated loan workflow
@@ -464,7 +464,7 @@ settleLoan LedgerParties {..} loanAgreement = do
   -- Prepare to construct Allocate instructions
   -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids
   instructionViews <- forA instructionCids $ \icid -> do
-    iv <- submit agent_charlie $ exerciseCmd icid GetView with viewer = agent_charlie
+    iv <- submit agent_charlie $ exerciseCmd icid Settlement.I.GetView with viewer = agent_charlie
     pure (icid, iv)
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
