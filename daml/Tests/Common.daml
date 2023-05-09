@@ -132,8 +132,9 @@ perfTest LedgerParties{..} = do
 
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
-  stuff <- preOrigination parties
-  originationData <- origination parties stuff
+  preOriginationStuff <- preOrigination parties
+  originationData <- origination parties preOriginationStuff
+  _ <- settleLoan parties preOriginationStuff originationData
   -- servicing parties originationData
   pure ()
 
@@ -450,17 +451,17 @@ settleLoan LedgerParties {..} preOriginationStuff loanAgreement = do
       settlementFactoryCid
 
   -- Get sig of participating lender
-  _ <- submit lender_gary do
-    exerciseCmd settlementProposalCid $ Accept_Lender lender_gary
+  Left settlementProposalCid2 <- submit lender_hortense do
+    exerciseCmd settlementProposalCid $ Accept_Lender lender_hortense
 
   -- Get sig of participating lender
-  _ <- submit lender_hortense do
-    exerciseCmd settlementProposalCid $ Accept_Lender lender_hortense
+  Left settlementProposalCid3 <- submit lender_gary do
+    exerciseCmd settlementProposalCid2 $ Accept_Lender lender_gary
 
   -- Get sig of participating borrower, all signatures should have been accumulated, tx instructions should be produced
   -- TODO: Should case to ensure it actually is 'Some' instead of 'None'
-  Some (batchCid, instructionCids) <- submit borrower_alice do
-    exerciseCmd settlementProposalCid Accept_Borrower
+  Right (batchCid, instructionCids) <- submit borrower_alice do
+    exerciseCmd settlementProposalCid3 Accept_Borrower
 
   -- Prepare to construct Allocate instructions
   -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids

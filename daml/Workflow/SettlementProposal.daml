@@ -26,7 +26,7 @@ template SettlementProposal
   where
     signatory loan.agent
     observer loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
-    choice Accept_Borrower : Optional (ContractId Batch.I, [ContractId Instruction.I])
+    choice Accept_Borrower : Either (ContractId SettlementProposal) (ContractId Batch.I, [ContractId Instruction.I])
       controller loan.borrower
       do
         let lendersAndBorrowers = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
@@ -34,9 +34,9 @@ template SettlementProposal
         if (sort sigAccumulator) == (sort lendersAndBorrowers) then do
           settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid
         else do
-          create this with sigAccumulator = loan.borrower::sigAccumulator
-          return None
-    choice Accept_Lender : Optional (ContractId Batch.I, [ContractId Instruction.I])
+          updatedContract <- create this with sigAccumulator = loan.borrower::sigAccumulator
+          return $ Left updatedContract
+    choice Accept_Lender : Either (ContractId SettlementProposal) (ContractId Batch.I, [ContractId Instruction.I])
       with
         currLender : Party
       controller (map fst $ Map.toList loan.participantsWithAmounts)
@@ -48,8 +48,8 @@ template SettlementProposal
 
         -- add the current choice controller to the list of acquired signatures
         else do
-          create this with sigAccumulator = currLender::sigAccumulator
-          return None
+          updatedContract <- create this with sigAccumulator = currLender::sigAccumulator
+          return $ Left updatedContract
 
     choice Decline : ()
       -- ^ Decline the request.
@@ -71,7 +71,7 @@ settleTransactions :
   , HasExercise t1 RouteProvider.Discover [RoutedStep]
   , HasExercise t2 Settlement.Instruct (a, [c])
   )
-  => r1 -> [Party] -> Text -> ContractId t1 -> ContractId t2 -> Update (Optional (a , [c]))
+  => r1 -> [Party] -> Text -> ContractId t1 -> ContractId t2 -> Update (Either (ContractId SettlementProposal) (a , [c]))
 settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid = do
   -- Settlement of lenders
   let lenderSteps = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
@@ -96,4 +96,4 @@ settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactor
       routedSteps
       settlementTime = None -- i.e., immediate settlement
 
-  return $ Some instructRes
+  return $ Right instructRes
