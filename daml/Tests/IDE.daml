@@ -16,11 +16,12 @@ createParties = do
   fed_ingrid <- allocateParty "Fed_Ingrid"
   pure $ LedgerParties { .. }
 
-
+{-
 perfTestIDE : Script ()
 perfTestIDE = do
   parties <- createParties
   perfTest parties
+-}
 
 goldenTestIDE : Script ()
 goldenTestIDE = do
