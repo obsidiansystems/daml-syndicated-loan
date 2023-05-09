@@ -287,7 +287,9 @@ data Origination = Origination with
   loanAgreement : LoanAgreement
   loanAgreementCid : ContractId LoanAgreement
   bond : Bond
-  aliceBondAccountCid : AccountKey
+  aliceBondAccountKey : AccountKey
+  garyBondAccountKey : AccountKey
+  garyBondHoldingKey : ContractId B.I
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
@@ -316,7 +318,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- TODO: Lenders declining to make an offer
   fundingInterestCids <- forA possibleLenders $ \lender -> do
     [(fundingRequestCid, fundingRequest)] <- getFundingRequestsFor lender
-    submit lender $ makeFundingInterest lender fundingRequestCid (amount, rate)
+    submit lender $ makeFundingInterest lender fundingRequestCid (amount / 2.0 + 1.0, rate)
   fundingInterests <- forA fundingInterestCids $ \cid -> do
     Some fundingInterest <- queryContractId agent_charlie cid
     pure (cid, fundingInterest)
@@ -345,7 +347,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
       custodian = fed_ingrid
       owner = borrower_alice
 
-  aliceBondAccountCid <- submit fed_ingrid do
+  aliceBondAccountKey <- submit fed_ingrid do
     exerciseCmd aliceAccountRequestCid CreateAccount.Accept with
         label = "AliceBond@Bank"
         description = "Account for Alice's Bond at Bank"
@@ -359,7 +361,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
       instrument = bond.reference
       amount = loanAgreement.loanTerms.amount
   
-  aliceBondHoldingCid <- submit fed_ingrid do
+  aliceBondHoldingKey <- submit fed_ingrid do
     exerciseCmd aliceBondRequestCid CreditAccount.Accept
 
   garyAccountRequestCid <- submit lender_gary do
@@ -367,7 +369,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
       custodian = fed_ingrid
       owner = lender_gary
 
-  garyBondAccountCid <- submit fed_ingrid do
+  garyBondAccountKey <- submit fed_ingrid do
     exerciseCmd garyAccountRequestCid CreateAccount.Accept with
         label = "GaryBond@Bank"
         description = "Account for Gary's holding of Alice's Bond at Bank"
@@ -377,20 +379,23 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
 
   bondTransferReq <- submit lender_gary do
     createCmd Transfer.Request with
-      receiverAccount = garyBondAccountCid
+      receiverAccount = garyBondAccountKey
       instrument = bond.reference
       amount = loanAgreement.loanTerms.amount
       currentOwner = borrower_alice
 
-  bondTransfer <- submitMulti [borrower_alice,lender_gary] [] do
+  garyBondHoldingKey <- submitMulti [borrower_alice,lender_gary] [] do
     exerciseCmd bondTransferReq Transfer.Accept with
-      holdingCid = aliceBondHoldingCid
+      holdingCid = aliceBondHoldingKey
 
   pure Origination with
     loanAgreement
     loanAgreementCid
     bond
-    aliceBondAccountCid
+    aliceBondAccountKey
+    garyBondAccountKey
+    garyBondHoldingKey
+
 
 type Amount = Decimal
 
@@ -457,15 +462,20 @@ buildBook
   -> [(ContractId FundingInterest, FundingInterest)]
   -> (RatePerAnnum, Map (ContractId FundingInterest) Amount, [ContractId FundingInterest])
 buildBook application _ _ _ [] = error "Not enough funding interest to construct loan"
-buildBook application currentInterest accumulatedAmount accumulatedBook ((fundingCid, funding)::fundings) = case funding.rate <= application.applicationData.maxInterestRate of
-    False -> error "Not enough funding interest below the maximum interest rate to construct loan"
-    True ->
+buildBook application currentInterest accumulatedAmount accumulatedBook ((fundingCid, funding)::fundings) =
+  if funding.rate > application.applicationData.maxInterestRate
+    then error "Not enough funding interest below the maximum interest rate to construct loan"
+    else
       let remainingRequiredFunding = application.applicationData.amount - accumulatedAmount
-       in case remainingRequiredFunding <= funding.amount of
-            True -> (funding.rate, Map.insertWith (+) fundingCid remainingRequiredFunding accumulatedBook, map fst fundings)
-            False -> buildBook application funding.rate (accumulatedAmount + funding.amount) (Map.insertWith (+) fundingCid funding.amount accumulatedBook) fundings
+       in if remainingRequiredFunding <= funding.amount
+            then (funding.rate, Map.insertWith (+) fundingCid remainingRequiredFunding accumulatedBook, map fst fundings)
+            else buildBook application funding.rate (accumulatedAmount + funding.amount) (Map.insertWith (+) fundingCid funding.amount accumulatedBook) fundings
 
-createPendingLoanAgreement : Party -> ContractId AcceptedLoan -> Map (ContractId FundingInterest) Amount -> Script (ContractId PendingLoanAgreement)
+createPendingLoanAgreement
+  : Party
+  -> ContractId AcceptedLoan
+  -> Map (ContractId FundingInterest) Amount
+  -> Script (ContractId PendingLoanAgreement)
 createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
   Some acceptance <- queryContractId agent acceptanceCid
   participantsWithAmounts <- fmap Map.fromList $ forA (Map.toList lendersWithAmounts) $ \(cid, amt) -> do
@@ -482,7 +492,7 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
           amount = acceptance.amount
           rate = acceptance.rate
           durationYears = 10 -- TODO: Get this
-
+          
   submit agent $ createCmd PendingLoanAgreement with
     agreement
     signed = []
