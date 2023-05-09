@@ -1,17 +1,19 @@
 module Workflow.Origination where
 
-import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(..), BusinessDayAdjustment(..))
-import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFrequency(..), PeriodicSchedule(..))
-import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
-import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
-import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(Act360))
+import DA.Date (addDays, toDateUTC)
 import DA.Map (Map)
 import qualified DA.Map as Map
 import qualified DA.Set as Set
-import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(NoRollConvention), Period(..))
-import DA.Date (addDays, toDateUTC)
 
-type Bond = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
+import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
+import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..), BusinessDayConventionEnum(..))
+import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(Act360))
+import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(NoRollConvention), Period(..))
+import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFrequency(..), PeriodicSchedule(..))
+import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
+
+import Workflow.Util
 
 -- ### TODO
 --   * Include "start date" of the loan (used to calculate coupon payment dates)
@@ -237,7 +239,6 @@ data LoanTerms = LoanTerms with
     -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
       deriving (Eq, Show)
 
--- TODO: Make this use Loan Terms and check equality of the terms instead of each individual field
 template AcceptedLoan
   with
     agent : Party
@@ -292,20 +293,24 @@ template PendingLoanAgreement
       do
         create this with
           signed = signer :: (this.signed)
-    choice PendingLoanAgreement_Finalize : ContractId LoanAgreement
+    choice PendingLoanAgreement_Finalize : (ContractId LoanAgreement, Bond)
       controller agreement.agent
       do
-        create this.agreement
+        a <- create this.agreement
+        now <- getTime -- TODO: reconsider if this is appropriate
+        let bond = loanAgreementToBond now undefined this.agreement
+        b <- createBond bond
+        return (a,b)
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
 -- NOTE: pays to agent for now. TODO: pay to participants
-loanAgreementToBondAndAmount
+loanAgreementToBond
   :  Time -- Current time
   -> InstrumentKey -- USD
   -> LoanAgreement
-  -> (Bond, Decimal)
-loanAgreementToBondAndAmount now usd a = (, a.loanTerms.amount)
+  -> BondInstrument
+loanAgreementToBond now usd a =
   let numberOfParticipants = Map.size a.participantsWithAmounts
   in Instrument with
     depository = a.agent -- same as agent for now
