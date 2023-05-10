@@ -5,8 +5,8 @@ import Daml.Script
 import DA.Foldable
 import DA.Set qualified as Set
 import Workflow.Origination
-
 import Scripts.Parties
+
 import Tests.Common(PreOriginationStuff(..), FundingSelection(..), selectFundingInterests)
 
 originationTests : LedgerParties -> PreOriginationStuff -> Script ()
@@ -137,6 +137,15 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- Now that Charlie has some funding interest, they can construct a book and propose a loan to alice
     -- Note that this will likely be done OFF ledger.
     let FundingSelection{..} = selectFundingInterests aliceLoanApplication fundingInterests
+
+    -- Charlie makes an offer to Alice that meets both Alice's requirements, and those of the lenders
+    aliceLoanOfferCid <- testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_CreateOffer with
+        rate = fundingSelection_ratePerAnnum
+    -- At this point, only the agent and the borrower are aware of the loan offer
+    testVisibility ps [borrower_alice, agent_charlie] aliceLoanOfferCid
+    -- Even when Alice accepts the loan offer, it is not yet visible to other parties.
+    aliceAcceptedLoanOfferCid <- testExercise ps borrower_alice aliceLoanOfferCid SyndicatedLoanOffer_Accept
+    testVisibility ps [borrower_alice, agent_charlie] aliceAcceptedLoanOfferCid
     pure ()
 
 

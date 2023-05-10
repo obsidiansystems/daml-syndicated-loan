@@ -252,6 +252,8 @@ template UnderwritingResult
         mandateLetterCid : ContractId AcceptedMandateLetter
       controller application.agent
       do
+        -- TODO: fix divulgence by deriving evidence of disclosure consent from the mandate letter
+        -- instead of using the mandate letter as such
         letter <- fetch mandateLetterCid
         assertMsg "Provided mandate letter was not for this underwriting report" $ letter.reportCid == self
         create UnderwritingDisclosure with
@@ -320,11 +322,11 @@ template AcceptedMandateLetter
     nonconsuming choice AcceptedMandateLetter_CreateOffer : ContractId SyndicatedLoanOffer
       with
         rate : RatePerAnnum
-        uuid : Text
       controller agent
       do
+        application <- fetch applicationCid
         create SyndicatedLoanOffer with
-          uuid
+          uuid = application.uuid
           mandateLetterCid = self
           mandateLetter = this
           terms = LoanTerms with
@@ -417,9 +419,9 @@ template FundingInterest
     amount : Decimal
     rate : RatePerAnnum
     -- TODO: for now we just reject offers that are greater than LoanApplication.maxInterestRate, but eventually we'd like to accept all offers that makes it possible for the agent to offer a final loan of less than or equal to LoanApplication.maxInterestRate.
+    -- TODO: expiry date after which the lender will be able to withdraw the interest
   where
-    signatory participant
-    observer agent
+    signatory participant, agent
     key (participant, agent, uuid) : (Party, Party, Text)
     maintainer key._1
     choice FundingInterest_Decline : ()

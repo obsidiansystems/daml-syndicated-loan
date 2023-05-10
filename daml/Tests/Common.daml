@@ -252,7 +252,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     pure (cid, fundingInterest)
   -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
   let FundingSelection{..} = selectFundingInterests loanApplicationSubmission fundingInterests
-  loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter uuid fundingSelection_ratePerAnnum
+  loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter fundingSelection_ratePerAnnum
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
@@ -375,9 +375,8 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
     agreement
     signed = []
 
-createLoanProposal : ContractId AcceptedMandateLetter -> Text -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
-createLoanProposal applicationCid uuid rate = exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
-  uuid
+createLoanProposal : ContractId AcceptedMandateLetter -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
+createLoanProposal applicationCid rate = exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
   rate
 
 acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoan)
