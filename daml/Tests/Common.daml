@@ -125,8 +125,8 @@ perfTest LedgerParties{..} = do
           holdingFactoryCid
     debug $ "Hortense"
 
-    accounts_hortense <- createAccounts LedgerParties{..} (accountFactoryCid, holdingFactoryCid) 5000
-    SplitResult{..} <- setupBorrower LedgerParties{..} config 5000
+    accounts_hortense <- createAccounts LedgerParties{..} (accountFactoryCid, holdingFactoryCid) 3000
+    SplitResult{..} <- setupBorrower LedgerParties{..} config 1
 
     acchelper_hortense <- submit lender_hortense $
       createCmd Helper with
@@ -143,11 +143,14 @@ perfTest LedgerParties{..} = do
         amount = 5.0
 
     let thing2 = zip batch_transfer_request splitCids
-        thing3 = chunksOf 200 thing2
+        thing3 = chunksOf 100 thing2
 
     debug $ "Length of [(ContractId Transfer.Request, ContractId Fungible)]: " <> show (L.length thing3)
     debug $ "Splitting Accept Events.."
     forA thing3 $ splitEvents LedgerParties{..}
+
+    debug $ show splitCids
+    debug $ show rest
     pure ()
 
 
