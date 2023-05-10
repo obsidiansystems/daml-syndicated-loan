@@ -1,24 +1,23 @@
 module Workflow.Origination where
 
-import DA.Date (date, toGregorian, addDays, toDateUTC)
+import DA.Date (date, toGregorian, toDateUTC)
 import DA.Map (Map)
-import qualified DA.Text as T
-import qualified DA.Map as Map
-import qualified DA.Set as Set
+import DA.Map qualified as Map
+import DA.Set qualified as Set
+import DA.Text qualified as T
 
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
 import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..), BusinessDayConventionEnum(..))
+import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
 import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(..), Period(..))
-import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFrequency(..), PeriodicSchedule(..))
-import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
-
-import Workflow.Util
-import qualified Daml.Finance.Interface.Types.Date.Calendar as Cal
-import qualified Daml.Finance.Interface.Types.Date.Schedule as Sched
+import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), PeriodicSchedule(..))
+import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
 
 import Util.Display
+import Workflow.Util
+
 -- ### TODO
 --   * Include "start date" of the loan (used to calculate coupon payment dates)
 --      * Equal to the day at which the loan principal amount is transferred to the borrower.
