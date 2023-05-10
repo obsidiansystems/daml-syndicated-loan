@@ -98,7 +98,7 @@ data PreOriginationStuff = PreOriginationStuff with
 -- - the accounts for the agents, lenders, and borrowers
 -- - initial assets for the lenders
 preOrigination : LedgerParties -> Script PreOriginationStuff
-preOrigination LedgerParties{..} = do
+preOrigination parties@(LedgerParties{..}) = do
     -- Create the Fed
 
     -- Create USD
@@ -124,6 +124,8 @@ preOrigination LedgerParties{..} = do
         observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
             [borrower_alice, borrower_bob]
 
+    let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
+    log "-- Creating accounts --"
     fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
       provider = agent_charlie
       observers = Map.empty
@@ -141,169 +143,44 @@ preOrigination LedgerParties{..} = do
         paths = Map.fromList
           [ ("LoanInstrument", Hierarchy with
               rootCustodian = borrower_alice
-              pathsToRootCustodian = fmap (::[]) (toList allParties)
+              pathsToRootCustodian = fmap (::[]) $ toList $ allParties parties
             )
           , ("USD", Hierarchy with
               rootCustodian = fed
-              pathsToRootCustodian = fmap (::[]) (toList allParties)
+              pathsToRootCustodian = fmap (::[]) $ toList $ allParties parties
             )
           ]
 
     -- ...for Hortenses's Bank
-    hortenseRequestCid <- submit lender_hortense do
-      createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed
+    (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense 100_000_000.00
 
-    hortenseAccount <- submit fed do
-      exerciseCmd hortenseRequestCid CreateAccount.Accept with
-        label = "Hortense@Bank"
-        description = "Account of Hortense at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid
-        observers = []
+    let makeBondAccount = makeAccount "Bond" accountFactoryCid holdingFactoryCid
 
-    -- allocate funds to Hortense
-    hortenseRequestCid <- submit lender_hortense do
-      createCmd CreditAccount.Request with
-        account = hortenseAccount
-        instrument = usdInstrument
-        amount = 100_000_000.00
-
-    hortenseCashHoldingCid <- submit fed do exerciseCmd hortenseRequestCid CreditAccount.Accept
-
-    -- Hortense's bond account (request)
-    hortenseBondAccountRequestCid <- submit lender_hortense do
-      createCmd CreateAccount.Request with
-        custodian = borrower_alice
-        owner = lender_hortense
-    -- Hortense's bond account (accept)
-    hortenseBondAccount <- submit borrower_alice do
-      exerciseCmd hortenseBondAccountRequestCid CreateAccount.Accept with
-          label = "HortenseBond@Bank"
-          description = "Account for Hortense's holding of Alice's Bond at Bank"
-          accountFactoryCid = accountFactoryCid
-          holdingFactoryCid = holdingFactoryCid
-          observers = [borrower_alice]
+    -- Hortense's bond account
+    hortenseBondAccount <- makeBondAccount lender_hortense borrower_alice
 
     -- ...for Gary's Bank
-    garyRequestCid <- submit lender_gary do
-      createCmd CreateAccount.Request with owner = lender_gary; custodian = fed
-    garyAccount <- submit fed do
-      exerciseCmd garyRequestCid CreateAccount.Accept with
-        label = "Gary@Bank"
-        description = "Account of Bob at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
+    (garyAccount, Some garyCashHoldingCid) <- mkCashAccount lender_gary 70_000_000.00
 
-    -- allocate funds to Gary
-    garyRequestCid <- submit lender_gary do
-      createCmd CreditAccount.Request with
-        account = garyAccount
-        instrument = usdInstrument
-        amount = 70_000_000.00
-
-    -- Gary's bond account (request)
-    garyBondAccountRequestCid <- submit lender_gary do
-      createCmd CreateAccount.Request with
-        custodian = borrower_alice
-        owner = lender_gary
-    -- Gary's bond account (accept)
-    garyBondAccount <- submit borrower_alice do
-      exerciseCmd garyBondAccountRequestCid CreateAccount.Accept with
-          label = "GaryBond@Bank"
-          description = "Account for Gary's holding of Alice's Bond at Bank"
-          accountFactoryCid = accountFactoryCid
-          holdingFactoryCid = holdingFactoryCid
-          observers = [borrower_alice]
-
-    garyCashHoldingCid <- submit fed do exerciseCmd garyRequestCid CreditAccount.Accept
+    -- Gary's bond account
+    garyBondAccount <- makeBondAccount lender_gary borrower_alice
 
     -- ...for Bob's Company
-    bobRequestCid <- submit borrower_bob do
-      createCmd CreateAccount.Request with owner = borrower_bob; custodian = fed
-    bobAccount <- submit fed do
-      exerciseCmd bobRequestCid CreateAccount.Accept with
-        label = "Bob@Fed"
-        description = "Account of Bob at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
+    (bobAccount, None) <- mkCashAccount borrower_bob 0.0
 
     -- ...for Alice's Company
-    aliceRequestCid <- submit borrower_alice do
-      createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed
-    aliceAccount <- submit fed do
-      exerciseCmd aliceRequestCid CreateAccount.Accept with
-        label = "Alice@Bank"
-        description = "Account of Alice at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
-    -- allocate funds to Alice
-    aliceRequestCid <- submit borrower_alice do
-      createCmd CreditAccount.Request with
-        account = aliceAccount
-        instrument = usdInstrument
-        amount = 250_684.9315
-
-    aliceCashHoldingCid <- submit fed do exerciseCmd aliceRequestCid CreditAccount.Accept
+    (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice 250_684.9315
 
     -- Alices's bond account (request)
-    aliceBondAccountRequestCid <- submit borrower_alice do
-      createCmd CreateAccount.Request with
-        custodian = borrower_alice
-        owner = borrower_alice
-    -- Alices's bond account (accept)
-    aliceBondAccount <- submit borrower_alice do
-      exerciseCmd aliceBondAccountRequestCid CreateAccount.Accept with
-          label = "AliceBond@Bank"
-          description = "Account for Alice's holding of Alice's Bond"
-          accountFactoryCid = accountFactoryCid
-          holdingFactoryCid = holdingFactoryCid
-          observers = []
+    aliceBondAccount <- makeBondAccount borrower_alice borrower_alice
 
     -- ...for Charlie's agency
-    charlieRequestCid <- submit agent_charlie do
-      createCmd CreateAccount.Request with owner = agent_charlie; custodian = fed
-    charlieAccount <- submit fed do
-      exerciseCmd charlieRequestCid CreateAccount.Accept with
-        label = "Charlie@Bank"
-        description = "Account of Charlie at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
-    -- allocate funds to Charlie
-    charlieRequestCid <- submit agent_charlie do
-      createCmd CreditAccount.Request with
-        account = charlieAccount
-        instrument = usdInstrument
-        amount = 6_000_000_000.00
-
-    charlieCashHoldingCid <- submit fed do exerciseCmd charlieRequestCid CreditAccount.Accept
+    (charlieAccount, Some charlieCashHoldingCid) <- mkCashAccount agent_charlie 6_000_000_000.00
     -- Charlies's bond account (request)
-    charlieBondAccountRequestCid <- submit agent_charlie do
-      createCmd CreateAccount.Request with
-        custodian = borrower_alice
-        owner = agent_charlie
-    -- Hortense's bond account (accept)
-    charlieBondAccount <- submit borrower_alice do
-      exerciseCmd charlieBondAccountRequestCid CreateAccount.Accept with
-          label = "CharlieBond@Bank"
-          description = "Account for Charlie's holding of Alice's Bond at Bank"
-          accountFactoryCid = accountFactoryCid
-          holdingFactoryCid = holdingFactoryCid
-          observers = [borrower_alice]
+    charlieBondAccount <- makeBondAccount agent_charlie borrower_alice
 
     -- ...for Debbie's agency
-    debbieRequestCid <- submit agent_debbie do
-      createCmd CreateAccount.Request with owner = agent_debbie; custodian = fed
-    debbieAccount <- submit fed do
-      exerciseCmd debbieRequestCid CreateAccount.Accept with
-        label = "Debbie@Bank"
-        description = "Account of Debbie at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
+    (debbieAccount, None) <- mkCashAccount agent_debbie 0.0
 
     let ledgerAccounts = LedgerAccounts with ..
     return $ PreOriginationStuff with
@@ -323,6 +200,15 @@ data Origination = Origination with
   loanAgreement : OriginatedLoanAgreement
   loanAgreementCid : ContractId OriginatedLoanAgreement
   originationTime : Time
+
+createLoanApplication : LoanApplicationSubmission -> Script (ContractId LoanApplicationSubmission)
+createLoanApplication loanApplicationSubmission = do
+  log "-- Loan application sent to Agent --"
+  -- Borrower submits an application for a loan
+  application <- submit loanApplicationSubmission.borrower $
+    createCmd loanApplicationSubmission
+  log loanApplicationSubmission
+  pure application
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
@@ -350,9 +236,8 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
           prospectus = "To test the syndicated loans framework :)"
           durationYears = 10
           schedule
-  log loanApplicationSubmission
   -- Borrower submits an application for a loan
-  application <- submit borrower_alice $ createCmd loanApplicationSubmission
+  application <- createLoanApplication loanApplicationSubmission
   -- Agent accepts it
   acceptedApplication <- submit agent_charlie $ exerciseCmd application LoanApplicationSubmission_Accept
     with
