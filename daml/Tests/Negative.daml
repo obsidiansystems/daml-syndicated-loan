@@ -123,6 +123,12 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- Nor does alice see the underwriting request
     testVisibility ps aliceUnderwritingRequestCid [ agent_charlie, underwriter_emma ]
 
+    aliceUnderwritingCid <- submit underwriter_emma $ exerciseCmd aliceUnderwritingRequestCid CreateUnderwritingResult with
+      result = True
+    -- Once the underwriting is complete, the original request has been archived
+    testVisibility ps aliceUnderwritingRequestCid []
+    -- The report is only visibile to the underwriter and the agent who requested it
+    testVisibility ps aliceUnderwritingCid [ agent_charlie, underwriter_emma ]
     pure ()
 
 -- | Given a contract and a set of parties who should be able to view the contract,
