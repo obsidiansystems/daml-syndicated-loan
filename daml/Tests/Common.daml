@@ -253,6 +253,14 @@ preOrigination LedgerParties{..} = do
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
         observers = []
+    aliceRequestCid <- submit borrower_alice do
+      createCmd CreditAccount.Request with
+        account = aliceAccount
+        instrument = usdInstrument
+        amount = 2_000_000.00
+
+    aliceCashHoldingCid <- submit fed_ingrid do exerciseCmd aliceRequestCid CreditAccount.Accept
+
 
     -- ...for Charlie's agency
     charlieRequestCid <- submit agent_charlie do
