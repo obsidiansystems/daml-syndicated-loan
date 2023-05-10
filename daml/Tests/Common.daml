@@ -56,14 +56,14 @@ import Workflow.SettlementProposal
 import Scripts.Parties
 import Scripts.Accounts
 
--- | Test that does not exercise the lending workflow as such, but
--- exercises transfers on the ledger to help us estimate throughput
--- of our settlement strategy.
 data Config = Config with
   instrument : InstrumentKey
   accountFactoryCid : ContractId Account.F
   holdingFactoryCid : ContractId Holding.F
 
+-- | Test that does not exercise the lending workflow as such, but
+-- exercises transfers on the ledger to help us estimate throughput
+-- of our settlement strategy.
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
   preOriginationStuff <- preOrigination parties
@@ -252,7 +252,7 @@ preOrigination LedgerParties{..} = do
     aliceBondAccount <- submit borrower_alice do
       exerciseCmd aliceBondAccountRequestCid CreateAccount.Accept with
           label = "AliceBond@Bank"
-          description = "Account for Alice's holding of Alice's Bond at Bank" -- Necessary because the custodian of USD and bond accounts differ
+          description = "Account for Alice's holding of Alice's Bond"
           accountFactoryCid = accountFactoryCid
           holdingFactoryCid = holdingFactoryCid
           observers = []
@@ -317,9 +317,7 @@ preOrigination LedgerParties{..} = do
 data Origination = Origination with
   loanAgreement : OriginatedLoanAgreement
   loanAgreementCid : ContractId OriginatedLoanAgreement
-  -- aliceBondAccountKey : AccountKey
-  -- garyBondAccountKey : AccountKey
-  -- garyBondHoldingKey : ContractId B.I
+  originationTime : Time
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
@@ -381,8 +379,8 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     (Map.keys fundingSelection_selected)
   -- Agent declines leftover funding interests
   forA_ fundingSelection_declined $ \declinedCid -> submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
-  
-  
+
+
   -- Agent creates a route provider explaining how payments should flow between involved parties
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
       createCmd IntermediatedStatic with
@@ -419,6 +417,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   pure Origination with
     loanAgreement
     loanAgreementCid
+    originationTime = now
 
 type Amount = Decimal
 
@@ -565,6 +564,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       routeProviderCid = preOriginationStuff.routeProviderCid
       settlementFactoryCid = preOriginationStuff.settlementFactoryCid
       bond = origination.loanAgreement.bondKey
+      settled = False
 
   -- Create a bond holding request
   aliceBondRequestCid <- submit borrower_alice do
@@ -578,23 +578,20 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
     exerciseCmd aliceBondRequestCid CreditAccount.Accept
 
   -- Get sig of participating lender
-  Left settlementProposalCid2 <- submit lender_hortense do
-    exerciseCmd settlementProposalCid $ Accept_Lender lender_hortense
+  settlementProposalCid2 <- submit lender_hortense do
+    exerciseCmd settlementProposalCid $ Add_Signature lender_hortense
 
   -- Get sig of participating lender
-  Left settlementProposalCid3 <- submit lender_gary do
-    exerciseCmd settlementProposalCid2 $ Accept_Lender lender_gary
+  settlementProposalCid3 <- submit lender_gary do
+    exerciseCmd settlementProposalCid2 $ Add_Signature lender_gary
 
-  -- Get sig of participating borrower, all signatures should have been accumulated, tx instructions should be produced
-  -- TODO: Should case to ensure it actually is 'Some' instead of 'None'
-  -- Right (batchCid, instructionCids) <- submit borrower_alice do
-  --   exerciseCmd settlementProposalCid3 Accept_Borrower
-  eitherUpdatedContractOrBatchInstructions <- submit borrower_alice do
-    exerciseCmd settlementProposalCid3 Accept_Borrower
+  -- Get sig of participating borrower
+  settlementProposalCid4 <- submit borrower_alice do
+    exerciseCmd settlementProposalCid3 $ Add_Signature borrower_alice
 
-  (allSignatureSettlementCid, batchCid, instructionCids) <- case eitherUpdatedContractOrBatchInstructions of
-    Left err -> fail $ "All signatures should be present " <> (show err)
-    Right batchInstructions -> return batchInstructions
+  -- Settle
+  (allSignatureSettlementCid, (batchCid, instructionCids)) <- submit borrower_alice do
+    exerciseCmd settlementProposalCid4 Settle
 
   -- Prepare to construct Allocate instructions
   -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids

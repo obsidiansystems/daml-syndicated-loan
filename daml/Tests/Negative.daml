@@ -3,6 +3,7 @@ module Tests.Negative where
 import Daml.Script
 
 import DA.Foldable
+import DA.Set qualified as Set
 import Workflow.Origination
 
 import Tests.Common(LedgerParties(..), PreOriginationStuff(..))
