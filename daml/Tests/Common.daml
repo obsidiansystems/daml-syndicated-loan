@@ -749,7 +749,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
           )
           (NE.nonEmpty $ filter ((== origination.bond.reference) . (.instrument) . snd) values)
       )
-      (Map.lookup lender_hortense settlementFungibleMap)
+      (Map.lookup party settlementFungibleMap)
 
 createRouteProvider : LedgerParties -> Script (ContractId RouteProvider.I)
 createRouteProvider LedgerParties {..} = do
