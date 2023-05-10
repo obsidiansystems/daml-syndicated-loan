@@ -6,7 +6,8 @@ import DA.Foldable
 import DA.Set qualified as Set
 import Workflow.Origination
 
-import Tests.Common(LedgerParties(..), PreOriginationStuff(..), FundingSelection(..), selectFundingInterests)
+import Scripts.Parties
+import Tests.Common(PreOriginationStuff(..), FundingSelection(..), selectFundingInterests)
 
 originationTests : LedgerParties -> PreOriginationStuff -> Script ()
 originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
