@@ -1,0 +1,116 @@
+module Tests.Negative where
+
+import Daml.Script
+
+import DA.Map (Map, empty)
+import qualified DA.Map as Map
+import qualified DA.Set as Set
+
+import Daml.Finance.Account.Account qualified as Account (Factory(..))
+import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
+
+import Daml.Finance.Interface.Types.Common.Types
+import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+
+import Workflow.CreateAccount qualified as CreateAccount
+import Workflow.CreditAccount qualified as CreditAccount
+import Workflow.Origination
+
+import Tests.Common(LedgerParties(..), PreOriginationStuff(..))
+import Tests.Common qualified as Common
+
+preoriginationTests : LedgerParties -> Script ()
+preoriginationTests LedgerParties{..} = do
+    let usdInstrument = InstrumentKey with
+            issuer = fed_ingrid
+            depository = fed_ingrid
+            id = Id "USD"
+            version = "0"
+        falseInstrument = InstrumentKey with
+            issuer = borrower_bob
+            depository = borrower_bob
+            id = Id "USD"
+            version = "0"
+
+    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed_ingrid do
+        createCmd Account.Factory
+          with
+            provider = fed_ingrid
+            observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $ 
+                [borrower_alice, borrower_bob]
+
+    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
+        createCmd Fungible.Factory with
+            provider = fed_ingrid
+            observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $ 
+                [borrower_alice, borrower_bob]
+
+    -- Infuse the lenders with capital
+    -- ...for Hortenses's Bank
+    hortenseRequestCid <- submit lender_hortense do
+      createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
+
+    hortenseAccount <- submit fed_ingrid do
+      exerciseCmd hortenseRequestCid CreateAccount.Accept with
+        label = "Hortense@Bank"
+        description = "Account of Hortense at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid
+        observers = []
+
+    hortenseRequestCid <- submit lender_hortense do
+      createCmd CreditAccount.Request with
+        account = hortenseAccount
+        instrument = usdInstrument
+        amount = 100_000_000.00
+
+    hortenseCashHoldingCid <- submit fed_ingrid do exerciseCmd hortenseRequestCid CreditAccount.Accept
+
+    pure ()
+
+originationTests : LedgerParties -> PreOriginationStuff -> Script ()
+originationTests LedgerParties{..} PreOriginationStuff{..} = do
+    let aliceApplicationData = LoanApplicationData with
+          instrument = usdInstrument
+          amount = 12_345_678.00
+          maxInterestRate = RatePerAnnum 0.05 -- 5% per annum
+          prospectus = "To validate the syndicated loans framework :)"
+          durationYears = 10
+        
+        aliceLoanApplication = LoanApplication with
+            borrower = borrower_alice
+            agent = agent_charlie
+            applicationData = aliceApplicationData
+
+        bobApplicationData = LoanApplicationData with
+          instrument = usdInstrument
+          amount = 98_765_432.00
+          maxInterestRate = RatePerAnnum 0.07 -- 7% per annum
+          prospectus = "To break the syndicated loans framework >:)"
+          durationYears = 7
+        
+        bobLoanApplication1 = LoanApplication with
+            borrower = borrower_bob
+            agent = agent_debbie
+            applicationData = bobApplicationData
+        
+        bobLoanApplication2 = LoanApplication with
+            borrower = borrower_bob
+            agent = agent_debbie
+            applicationData = bobApplicationData
+
+    -- Bob cannot submit an application for Alice
+    submitMustFail borrower_bob $ createCmd aliceLoanApplication
+
+    -- Alice submits her application
+    aliceApplicationCid <- submit borrower_alice $ createCmd aliceLoanApplication
+
+    -- Bob cannot see alice's submitted application
+    None <- queryContractId borrower_bob aliceApplicationCid
+    -- Charlie can
+    Some _ <- queryContractId agent_charlie aliceApplicationCid
+    -- Debbie cannot
+    None <- queryContractId agent_debbie aliceApplicationCid
+
+    pure ()
