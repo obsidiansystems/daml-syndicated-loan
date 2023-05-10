@@ -4,6 +4,7 @@ module Workflow.Origination
   , AcceptedLoanApplication_StartProcess(..)
   , AcceptedMandateLetter(..)
   , AcceptedMandateLetter_CreateOffer(..)
+  , AcceptedMandateLetter_CreateToken(..)
   , CreateUnderwritingResult(..)
   , FundingInterest(..)
   , FundingInterest_Decline(..)
@@ -525,12 +526,12 @@ template LoanAgreement
 
 template PendingLoanAgreement
   with
-    agreement : LoanAgreement
+    loanAgreement : LoanAgreement
     signed : [Party]
   where
     -- TODO: ensure clause
-    signatory agreement.agent, signed
-    observer (Map.keys agreement.participantsWithAmounts), agreement.borrower
+    signatory loanAgreement.agent, signed
+    observer (Map.keys loanAgreement.participantsWithAmounts), loanAgreement.borrower
     choice PendingLoanAgreement_Sign : ContractId PendingLoanAgreement
       with
         signer : Party
@@ -544,18 +545,18 @@ template PendingLoanAgreement
         routeProviderCid : ContractId RouteProvider.I
         settlementFactoryCid : ContractId Settlement.F
         fixedRateBondFactoryCid : ContractId FixedRate.F
-      controller agreement.agent
+      controller loanAgreement.agent
       do
-        let bondInstrument = loanAgreementToBondCreate now this.agreement.loanTerms.instrument this.agreement
+        let bondInstrument = loanAgreementToBondCreate now this.loanAgreement.loanTerms.instrument this.loanAgreement
         bondCid <- exercise fixedRateBondFactoryCid bondInstrument
         let bondKey = InstrumentKey with
               issuer = bondInstrument.fixedRate.instrument.issuer
               depository = bondInstrument.fixedRate.instrument.depository
-              id = Id agreement.uuid
+              id = Id loanAgreement.uuid
               version = "0"
-            agent = agreement.agent
-            borrower = agreement.borrower
-            lenders = Map.keys agreement.participantsWithAmounts
+            agent = loanAgreement.agent
+            borrower = loanAgreement.borrower
+            lenders = Map.keys loanAgreement.participantsWithAmounts
             lenderSet = Set.fromList lenders
         lifecycleRule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
           create $ LifecycleRule.Rule with
@@ -573,7 +574,7 @@ template PendingLoanAgreement
             settlementFactoryCid
             netInstructions = False
         create OriginatedLoanAgreement with
-          agreement = this.agreement
+          loanAgreement = this.loanAgreement
           bondInstrument
           bondKey
           bondCid
@@ -588,7 +589,7 @@ data OriginatedLoanAgreement_LifecycleData = OriginatedLoanAgreement_LifecycleDa
 
 template OriginatedLoanAgreement
   with
-    agreement : LoanAgreement
+    loanAgreement : LoanAgreement
     bondInstrument : BondInstrument
     bondKey : InstrumentKey
     bondCid : ContractId BaseInstrument.I
@@ -598,12 +599,12 @@ template OriginatedLoanAgreement
     claimRule : ContractId Claim.Claim
 
   where
-    signatory agreement.agent, agreement.borrower, Map.keys agreement.participantsWithAmounts
-    ensure sum (Map.values agreement.participantsWithAmounts) == agreement.loanTerms.amount
+    signatory loanAgreement.agent, loanAgreement.borrower, Map.keys loanAgreement.participantsWithAmounts
+    ensure sum (Map.values loanAgreement.participantsWithAmounts) == loanAgreement.loanTerms.amount
 
     nonconsuming choice OriginatedLoanAgreement_Lifecycle : OriginatedLoanAgreement_LifecycleData
       with today : Date
-      controller agreement.agent
+      controller loanAgreement.agent
       do
         let parties = Set.fromList (signatory this)
             updateEvent = clockUpdateEvent parties parties today
