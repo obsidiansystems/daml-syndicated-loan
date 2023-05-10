@@ -80,6 +80,20 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
     -- CREATE_PERIODIC_SCHEDULE_END
     periodicSchedule
 
+runCreateParties : Script LedgerParties
+runCreateParties = createParties
+
+runPreOrigination : Script (LedgerParties, PreOriginationStuff)
+runPreOrigination = do
+  parties <- createParties
+  preOrig <- preOrigination parties
+  pure (parties, preOrig)
+
+runOrigination = do
+  (parties, preOrig) <- runPreOrigination
+  orig <- origination parties preOrig
+  pure (parties, preOrig, orig)
+
 run : Script ()
 run = do
   setTime (time (date 2023 Apr 12) 4 4 4)
