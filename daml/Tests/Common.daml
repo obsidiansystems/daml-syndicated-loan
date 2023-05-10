@@ -397,12 +397,6 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
             )
           ]
 
-  -- Agent creates a settlement factory
-  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
-    createCmd Settlement.Factory with
-      provider = agent_charlie
-      observers = Set.fromList [borrower_alice,lender_gary, lender_hortense]
-  
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
@@ -532,30 +526,6 @@ data OriginationSettlement = OriginationSettlement with
 
 settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script OriginationSettlement
 settleLoan LedgerParties {..} preOriginationStuff origination = do
-  -- TODO: Below two steps is copy/paste from runBondStep
-
-  -- 1. Create Route Provider
-  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
-      createCmd IntermediatedStatic with
-        provider = agent_charlie
-        observers = Set.fromList [borrower_alice, lender_gary, lender_hortense]
-        paths = Map.fromList
-          [ ("LoanInstrument", Hierarchy with
-              rootCustodian = borrower_alice
-              pathsToRootCustodian = [[lender_gary], [lender_hortense], [agent_charlie]]
-            )
-          , ("USD", Hierarchy with
-              rootCustodian = fed
-              pathsToRootCustodian = [[borrower_alice], [lender_gary], [lender_hortense], [agent_charlie]]
-            )
-          ]
-
-  -- 2. Create Settlement Factory
-  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
-    createCmd Settlement.Factory with
-      provider = agent_charlie
-      observers = Set.fromList [borrower_alice, lender_gary, lender_hortense]
-
   -- Generate Settlement Proposal
   settlementProposalCid <- submit agent_charlie do
     createCmd SettlementProposal with
