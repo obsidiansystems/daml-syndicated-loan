@@ -2,6 +2,7 @@ module Workflow.Util
   ( Bond(..)
   , BondInstrument
   , createBond
+  , createReference
   )
   where
 

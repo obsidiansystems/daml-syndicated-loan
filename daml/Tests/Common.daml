@@ -42,8 +42,9 @@ import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge)
 import Daml.Finance.Interface.Types.Common.Types
 import Daml.Finance.Settlement.Factory (Factory(..))
 import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
-import Daml.Finance.Settlement.Instruction qualified as Settlement
 import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
+import Daml.Finance.Settlement.RouteProvider.SingleCustodian qualified as SingleCustodian
+import Daml.Finance.Settlement.Instruction qualified as Settlement
 
 import Util.Display
 import Workflow.CreateAccount qualified as CreateAccount
@@ -51,7 +52,6 @@ import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 import Workflow.SettlementProposal
 import Workflow.Transfer qualified as Transfer
-import Workflow.Util
 
 -- Helper Template for test batching
 template Helper with
@@ -415,9 +415,11 @@ preOrigination LedgerParties{..} = do
       aliceCashHoldingCid
 
 data Origination = Origination with
-  loanAgreement : LoanAgreement
-  loanAgreementCid : ContractId LoanAgreement
-  bond : Bond
+  loanAgreement : OriginatedLoanAgreement
+  loanAgreementCid : ContractId OriginatedLoanAgreement
+  -- aliceBondAccountKey : AccountKey
+  -- garyBondAccountKey : AccountKey
+  -- garyBondHoldingKey : ContractId B.I
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
@@ -471,14 +473,43 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     (Map.keys fundingSelection_selected)
   -- Agent declines leftover funding interests
   submit agent_charlie $ forA_ fundingSelection_declined $ \declinedCid -> exerciseCmd declinedCid FundingInterest_Decline
+  
+  
+  -- Agent creates a route provider explaining how payments should flow between involved parties
+  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
+      createCmd IntermediatedStatic with
+        provider = agent_charlie
+        observers = Set.fromList [borrower_alice, lender_gary]
+        paths = Map.fromList
+          [ ("LoanInstrument", Hierarchy with
+              rootCustodian = borrower_alice
+              pathsToRootCustodian = [[lender_gary]]
+            )
+          , ("USD", Hierarchy with
+              rootCustodian = fed_ingrid
+              pathsToRootCustodian = [[borrower_alice], [lender_gary]]
+            )
+          ]
+
+  -- Agent creates a settlement factory
+  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
+    createCmd Factory with
+      provider = agent_charlie
+      observers = Set.fromList [borrower_alice,lender_gary]
+  
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
-  (loanAgreementCid, bond) <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+  now <- getTime
+  loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+    with
+      now
+      routeProviderCid
+      settlementFactoryCid
+
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
 
   pure Origination with
     loanAgreement
     loanAgreementCid
-    bond
 
 type Amount = Decimal
 
@@ -629,14 +660,14 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       sigAccumulator = []
       routeProviderCid
       settlementFactoryCid
-      bond = origination.bond.reference
+      bond = origination.loanAgreement.bondKey
 
   -- Create a bond holding request
   aliceBondRequestCid <- submit borrower_alice do
     createCmd CreditAccount.Request with
       account = preOriginationStuff.ledgerAccounts.aliceBondAccount
-      instrument = origination.bond.reference
-      amount = origination.loanAgreement.loanTerms.amount
+      instrument = origination.loanAgreement.bondKey
+      amount = origination.loanAgreement.agreement.loanTerms.amount
 
   -- Create a bond holding held by Alice
   aliceBondHoldingKey <- submit borrower_alice do
@@ -668,8 +699,8 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
     pure (icid, iv)
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
-  let bondCurrency = origination.bond.instrument.currency
-      bondKey = origination.bond.reference
+  let bondCurrency = origination.loanAgreement.bondInstrument.currency
+      bondKey = origination.loanAgreement.bondKey
   -- initiate Map Party (ContractId Holding)
   let partyHoldingsMap : Map (Party, InstrumentKey) (Optional (ContractId HoldingBase.Base))
       partyHoldingsMap = Map.fromList
@@ -772,7 +803,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
     lookupNonEmptyUsdHoldings : Show a => Party -> Map Party [(a, Fungible.Fungible)] -> Script (NonEmpty (a, Fungible.Fungible))
     lookupNonEmptyUsdHoldings party settlementFungibleMap =
-      let bondCurrency = origination.bond.instrument.currency
+      let bondCurrency = origination.loanAgreement.bondInstrument.currency
       in optional
         (fail $ show party <> " not found in settlementFungibleMap: " <> show settlementFungibleMap)
         (\values ->
@@ -799,6 +830,6 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
               then pure $ L.head $ NE.toList nonEmptyBondsList
               else fail $ "Expected " <> show party <> " to hold exactly one Alice-bond. Found: " <> show (NE.toList nonEmptyBondsList)
           )
-          (NE.nonEmpty $ filter ((== origination.bond.reference) . (.instrument) . snd) values)
+          (NE.nonEmpty $ filter ((== origination.loanAgreement.bondKey) . (.instrument) . snd) values)
       )
       (Map.lookup party settlementFungibleMap)

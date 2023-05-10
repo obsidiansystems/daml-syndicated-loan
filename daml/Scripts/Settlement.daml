@@ -3,11 +3,12 @@ module Scripts.Settlement where
 import Daml.Script
 
 import DA.Date (toDateUTC, Month(..), date, toGregorian)
-import qualified DA.Map as Map
-import qualified DA.Set as Set
+import DA.Map qualified as Map
+import DA.Set qualified as Set
 import DA.Time (time)
 
 import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule (Rule(..))
+import Daml.Finance.Interface.Claims.Claim qualified as Claim (Claim(..), GetClaims(..))
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I, Base)
 import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I, ClaimEffect(..))
 import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle (Lifecycle, Evolve(..))
@@ -142,9 +143,11 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit borrower do
     createCmd Factory with
       provider = borrower
-      observers = Set.fromList [borrower]
+      observers = Set.fromList [borrower,lender]
 
   now <- getTime
+  result <- submit borrower_alice $ exerciseCmd (toInterfaceContractId @Claim.Claim orig.loanAgreement.bondCid) Claim.GetClaims with actor = borrower_alice
+  debug $ show result
 
   let (y',m',d') = toGregorian (toDateUTC now)
       today = date (y'+1) m' d'
@@ -173,11 +176,12 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement
   (_newBondOpt, [effectCid]) <- submitMulti [agent, borrower] [] $
     exerciseCmd lifecycleRule Lifecycle.Evolve with
       eventCid = updateEventCid
-      instrument = orig.bond.reference
+      instrument = orig.loanAgreement.bondKey
       observableCids = []
 
   let lenderGaryBondHoldingBase = toInterfaceContractId @Holding.Base lenderGaryBondHolding
-  claimResult <- submitMulti [agent, borrower, lender] [] $
+  -- claimResult <- submitMulti [agent, borrower, lender] [] $
+  claimResult <- submit lender $
     exerciseCmd claimRule Claim.ClaimEffect with
       claimer = lender
       holdingCids = [lenderGaryBondHoldingBase]
