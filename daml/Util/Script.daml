@@ -1,0 +1,15 @@
+-- | Helpers for writing daml scripts
+module Util.Script where
+
+import DA.Functor
+import DA.Stack (HasCallStack)
+
+import Daml.Script
+
+-- | Submit commands as a transaction, but discard the result
+submit_ : (Functor m, HasSubmit m cmds) => Party -> cmds a -> m ()
+submit_ p = void . submit p
+
+-- | Submit commands using the authorization of multiple parties, but discard the result
+submitMulti_ : HasCallStack => [Party] -> [Party] -> Commands a -> Script ()
+submitMulti_ p1 p2 = void . submitMulti p1 p2
