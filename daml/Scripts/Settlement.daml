@@ -202,7 +202,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} OriginationSettlement{..} 
     allocation = CreditReceiver
   submit lender $ exerciseCmd bondProduced2 Instruction.Approve with
     actors = Set.fromList [lender]
-    approval = TakeDelivery ledgerAccounts.garyAccount
+    approval = TakeDelivery ledgerAccounts.garyBondAccount
 
   (couponProduced2, _) <- submit borrower $ exerciseCmd couponProduced Instruction.Allocate with
     actors = Set.fromList [borrower]
