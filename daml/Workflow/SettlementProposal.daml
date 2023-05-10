@@ -17,6 +17,7 @@ import Daml.Finance.Interface.Settlement.Types (RoutedStep, Step(..))
 import DA.Set (singleton)
 
 import Workflow.Origination
+import qualified Daml.Finance.Interface.Holding.Base as Base
 
 template SettlementProposal
   with
@@ -72,14 +73,13 @@ template SettlementProposal
       -- ^ Withdraw the request.
       controller loan.borrower
       do pure ()
-    choice ExecuteSettlement : ()
+    choice ExecuteSettlement : [ContractId Base.Base]
       with
         batchCid : ContractId Batch.I
       controller loan.borrower
       do
         exercise batchCid Batch.Settle with
           actors = S.singleton loan.borrower
-        return ()
 
 settleTransactions :
   (HasField "agent" r1 Party

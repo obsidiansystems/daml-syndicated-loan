@@ -655,7 +655,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   --       actors = S.singleton agent_charlie
 
   -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
-  _ <- submit borrower_alice do
+  settlementBases <- submit borrower_alice do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
   return ()
