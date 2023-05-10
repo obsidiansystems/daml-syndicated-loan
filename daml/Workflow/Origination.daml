@@ -249,10 +249,10 @@ template UnderwritingResult
     nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
       with
         disclose_to : Party
-        mandateLetterCid : ContractId AcceptedMandateLetter
+        mandateLetterTokenCid : ContractId AcceptedMandateLetterToken
       controller application.agent
       do
-        letter <- fetch mandateLetterCid
+        letter <- fetch mandateLetterTokenCid
         assertMsg "Provided mandate letter was not for this underwriting report" $ letter.reportCid == self
         create UnderwritingDisclosure with
           underwriter
@@ -332,6 +332,21 @@ template AcceptedMandateLetter
             amount = mandateLetter.amount
             rate
             durationYears = mandateLetter.durationYears
+    nonconsuming choice AcceptedMandateLetter_CreateToken : ContractId AcceptedMandateLetterToken
+      controller agent
+      do
+        create AcceptedMandateLetterToken with
+          borrower
+          agent
+          reportCid
+
+template AcceptedMandateLetterToken
+  with
+    borrower : Party
+    agent : Party
+    reportCid : ContractId UnderwritingResult
+  where
+    signatory borrower, agent
 
 -- | This template represents a signed underwriting report that is being shared with a prospective lender.
 -- The agent cannot request funding from a lender without providing this information. It is a separate template
