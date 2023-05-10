@@ -89,6 +89,7 @@ runPreOrigination = do
   preOrig <- preOrigination parties
   pure (parties, preOrig)
 
+runOrigination : Script (LedgerParties, PreOriginationStuff, Origination)
 runOrigination = do
   (parties, preOrig) <- runPreOrigination
   orig <- origination parties preOrig
@@ -151,7 +152,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       updateEvent = clockUpdateEvent parties parties today
   updateEventCid <- fmap toInterfaceContractId $
     submitMulti [agent,borrower,lender] [] $ do createCmd updateEvent
-  
+
   lifecycleRule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
     submitMulti [agent, borrower] [] $ createCmd $ LifecycleRule.Rule with
       providers = Set.fromList [borrower]
@@ -163,7 +164,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       lifecycler = agent
       id = Id "LifecycleRule"
       description = "Rule to lifecycle the bond instrument"
-  
+
   claimRule <- fmap (toInterfaceContractId @ClaimI.I) $
     submit borrower_alice $ createCmd $ Claim.Rule with
       providers = Set.fromList [borrower]
@@ -185,7 +186,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       holdingCids = [orig.garyBondHoldingKey]
       effectCid
       batchId = Id "Loan interest payment"
-    
+
   --  "ClaimResult {batchCid = 005a721ff9bbbe25b7822fe7ae736d364e4b2f4482cc9412226396d7a1705c3e99, instructionCids = [00578216f491920b727b6133e088f032698ed371746825c44448103595ff1ca284,005e20ed7dc4fb8d5f779d9a9b404efa9b1d528b73376f0a1b356d246ea01402ba,004413d0a144deeca3409bcd04984f87d3033c2fac531187c6b557cc9a0f96dbe8]}"
 
   -- Allocate and Approve
