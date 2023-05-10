@@ -312,7 +312,9 @@ data Origination = Origination with
   bond : Bond
   aliceBondAccountKey : AccountKey
   garyBondAccountKey : AccountKey
-  garyBondHoldingKey : ContractId B.I
+  hortenseBondAccountKey : AccountKey
+  charlieBondAccountKey : AccountKey
+  charlieBondHoldingKey : ContractId B.I
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
@@ -378,6 +380,19 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
         holdingFactoryCid = holdingFactoryCid
         observers = []
 
+  charlieAccountRequestCid <- submit agent_charlie do
+    createCmd CreateAccount.Request with
+      custodian = agent_charlie
+      owner = agent_charlie
+
+  charlieBondAccountKey <- submit agent_charlie do
+    exerciseCmd charlieAccountRequestCid CreateAccount.Accept with
+        label = "CharlieBond@Bank"
+        description = "Account for Charlie's Bond at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = []
+
   charlieBondRequestCid <- submit agent_charlie do
     createCmd CreditAccount.Request with
       account = ledgerAccounts.charlieAccount
@@ -400,16 +415,18 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
         holdingFactoryCid = holdingFactoryCid
         observers = [agent_charlie]
 
-  bondTransferReq <- submit lender_gary do
-    createCmd Transfer.Request with
-      receiverAccount = garyBondAccountKey
-      instrument = bond.reference
-      amount = loanAgreement.loanTerms.amount
-      currentOwner = agent_charlie
+  hortenseAccountRequestCid <- submit lender_hortense do
+    createCmd CreateAccount.Request with
+      custodian = agent_charlie
+      owner = lender_hortense
 
-  garyBondHoldingKey <- submit agent_charlie do
-    exerciseCmd bondTransferReq Transfer.Accept with
-      holdingCid = charlieBondHoldingKey
+  hortenseBondAccountKey <- submit agent_charlie do
+    exerciseCmd hortenseAccountRequestCid CreateAccount.Accept with
+        label = "HortenseBond@Bank"
+        description = "Account for Hortense's holding of Alice's Bond at Bank"
+        accountFactoryCid = accountFactoryCid
+        holdingFactoryCid = holdingFactoryCid
+        observers = [agent_charlie]
 
   pure Origination with
     loanAgreement
@@ -417,7 +434,9 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     bond
     aliceBondAccountKey
     garyBondAccountKey
-    garyBondHoldingKey
+    hortenseBondAccountKey
+    charlieBondAccountKey
+    charlieBondHoldingKey
 
 
 type Amount = Decimal
@@ -569,7 +588,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       instrument = origination.bond.reference
       amount = origination.loanAgreement.loanTerms.amount
 
-  -- Create a bond holding held by Alice
+  -- Create a bond holding held by Charlie
   charlieBondHoldingKey <- submit fed_ingrid do
     exerciseCmd charlieBondRequestCid CreditAccount.Accept
 
@@ -599,26 +618,22 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
     pure (icid, iv)
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
-  -- Create bond holding for Alice
-  -- aliceRequestCid <- submit borrower_alice do
-  --   createCmd CreditAccount.Request with
-  --     account = preOriginationStuff.ledgerAccounts.aliceAccount
-  --     instrument = bond.reference
-  --     amount =  loanAgreement.loanTerms.amount
-
-  -- TODO: CAUTION DO NOT DO THIS, just a test
-  -- aliceBondHoldingCid <- submit fed_ingrid do exerciseCmd aliceRequestCid CreditAccount.Accept
-
-  -- initiate Map Party (ContractId Holding)
-  let partyHoldingsMap = Map.fromList
+  -- initiate Map Party (Optional ContractId CashHolding, Optional ContractId BondHolding)
+  let partyCashHoldingsMap = Map.fromList
         [ (lender_gary, Some preOriginationStuff.garyCashHoldingCid)
         , (lender_hortense, Some preOriginationStuff.hortenseCashHoldingCid)
         , (agent_charlie, Some preOriginationStuff.charlieCashHoldingCid)
         , (borrower_alice, Some preOriginationStuff.aliceCashHoldingCid)
         ]
+  -- TODO: This should be used to transfer bonds
+  -- let partyBondAccountsMap = Map.fromList
+  --       [ (lender_gary, garyBondAccountKey)
+  --       , (lender_hortense, hortenseBondAccountKey)
+  --       , (agent_charlie, charlieBondAccountKey)
+  --       , (borrower_alice, aliceBondAccountKey)
+  --       ]
 
-  -- TODO: allow charlie to delegate on Alice's account
-  let f (accum, map') (icid, routedStep) = do
+      f (accum, map') (icid, routedStep) = do
         let key' = routedStep.sender
             optionalReceiverHoldingCid = Map.lookup key' map'
         debug $ "allocatedSettleInstructions: " <> show key'
@@ -642,7 +657,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
             return ((routedStep.receiver, allocInstructions) :: accum, newMap)
   -- Have each party pledge where funds should be coming from
-  allocatedSettleInstructions <- fst <$> foldlA f ([], partyHoldingsMap) routedSteps
+  allocatedSettleInstructions <- fst <$> foldlA f ([], partyCashHoldingsMap) routedSteps
 
   -- initiate Map Party AccountKey
   let partyAccountMap = Map.fromList
