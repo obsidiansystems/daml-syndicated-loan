@@ -73,6 +73,7 @@ data PreOriginationStuff = PreOriginationStuff with
   holdingFactoryCid : ContractId Holding.F
   fixedRateBondFactoryCid : ContractId FixedRate.F
   settlementFactoryCid : ContractId Settlement.F
+  routeProviderCid : ContractId RouteProvider.I
   usdInstrument : InstrumentKey
   ledgerAccounts : LedgerAccounts
   hortenseCashHoldingCid : ContractId HoldingBase.I
@@ -119,6 +120,22 @@ preOrigination LedgerParties{..} = do
       createCmd Settlement.Factory with
         provider = agent_charlie
         observers = Set.fromList [borrower_alice, borrower_bob]
+
+    -- Create Route Provider
+    routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit borrower_alice do
+      createCmd IntermediatedStatic with
+        provider = borrower_alice
+        observers = Set.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
+        paths = Map.fromList
+          [ ("LoanInstrument", Hierarchy with
+              rootCustodian = borrower_alice
+              pathsToRootCustodian = fmap (::[]) (toList allParties)
+            )
+          , ("USD", Hierarchy with
+              rootCustodian = fed_ingrid
+              pathsToRootCustodian = fmap (::[]) (toList allParties)
+            )
+          ]
 
     -- ...for Hortenses's Bank
     hortenseRequestCid <- submit lender_hortense do
@@ -260,6 +277,7 @@ preOrigination LedgerParties{..} = do
       holdingFactoryCid
       fixedRateBondFactoryCid
       settlementFactoryCid
+      routeProviderCid
       usdInstrument
       ledgerAccounts
       hortenseCashHoldingCid
@@ -481,28 +499,12 @@ settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script Origi
 settleLoan LedgerParties {..} preOriginationStuff origination = do
   -- TODO: Below two steps is copy/paste from runBondStep
 
-  -- 1. Create Route Provider
-  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit borrower_alice do
-      createCmd IntermediatedStatic with
-        provider = borrower_alice
-        observers = Set.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
-        paths = Map.fromList
-          [ ("LoanInstrument", Hierarchy with
-              rootCustodian = borrower_alice
-              pathsToRootCustodian = [[lender_gary], [lender_hortense]]
-            )
-          , ("USD", Hierarchy with
-              rootCustodian = fed_ingrid
-              pathsToRootCustodian = [[borrower_alice], [lender_gary], [lender_hortense]]
-            )
-          ]
-
   -- Generate Settlement Proposal
   settlementProposalCid <- submit borrower_alice do
     createCmd SettlementProposal with
       loan = origination.loanAgreement
       sigAccumulator = []
-      routeProviderCid
+      routeProviderCid = preOriginationStuff.routeProviderCid
       settlementFactoryCid = preOriginationStuff.settlementFactoryCid
       bond = origination.loanAgreement.bondKey
 

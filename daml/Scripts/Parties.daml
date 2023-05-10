@@ -1,6 +1,8 @@
 -- | Helper script to set up parties on the ledger for testing
 module Scripts.Parties where
 
+import DA.Set (Set)
+import DA.Set qualified as Set
 import Daml.Script
 
 -- | Parties representing various agents in the syndicated loan workflow
@@ -16,6 +18,7 @@ data LedgerParties = LedgerParties with
     lender_gary : Party
     lender_hortense : Party
     fed_ingrid : Party
+    allParties : Set Party
   deriving (Show, Eq, Ord)
 
 createParties : Script LedgerParties
@@ -29,4 +32,15 @@ createParties = do
   lender_gary <- allocateParty "Lender_Gary"
   lender_hortense <- allocateParty "Lender_Hortense"
   fed_ingrid <- allocateParty "Fed_Ingrid"
+  let allParties = Set.fromList
+        [ borrower_alice
+        , borrower_bob
+        , agent_charlie
+        , agent_debbie
+        , underwriter_emma
+        , underwriter_fred
+        , lender_gary
+        , lender_hortense
+        , fed_ingrid
+        ]
   pure $ LedgerParties { .. }
