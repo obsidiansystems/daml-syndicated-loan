@@ -120,6 +120,7 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- To maintain the privacy of the underwriters and the lenders, Charlie kicks off a workflow not involving the borrower as a signatory
     -- Later on, we will ensure that the loan agreement corresponds with the application Alice submitted.
     aliceApplicationProcessCid <- testExercise ps agent_charlie aliceApplicationCid AcceptedLoanApplication_StartProcess
+    testVisibility ps [ agent_charlie ] aliceApplicationProcessCid
 
     -- Charlie submits alice's application to an underwriter— NO ONE else has
     -- the authority to do so.
@@ -143,6 +144,12 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- The report is only visible to the underwriter and the agent who requested it
     testVisibility ps [ agent_charlie, underwriter_emma ] aliceUnderwritingCid
 
+    -- With the report in hand, Charlie is prepared to make an offer to Alice.
+    --
+    -- NOTE: This emits a divulgence warning just as above. However, Alice can only seen the application process contract,
+    -- not anything underlying the underwriting process.
+    aliceMandateLetterOfferCid <- testExercise ps agent_charlie aliceApplicationProcessCid LoanApplicationProcess_OfferMandateLetter with
+        reportCid = aliceUnderwritingCid
 
     pure ()
 
@@ -155,6 +162,10 @@ partiesList (LedgerParties a b c d e f g h i) =
 -- | Given a contract and a set of parties who should be able to view the contract,
 -- confirms that this is the case and moreover, the other parties of the test script
 -- cannot see the contract.
+--
+-- Note that this tests visibility by *querying*. Fetching could still succeed if
+-- divulgence is in play. In order to test divulgence, we must attempt to exercise
+-- a contract or fetch it within a transaction.
 testVisibility
     : (HasTemplateTypeRep c, HasFromAnyTemplate c, HasToAnyTemplate c, HasAgreement c)
     => LedgerParties

@@ -14,6 +14,7 @@ module Workflow.Origination
   , LoanApplicationSubmission(..)
   , LoanApplicationData(..)
   , LoanApplicationProcess_CreateUnderwritingRequest(..)
+  , LoanApplicationProcess_OfferMandateLetter(..)
   , LoanApplicationSubmission_Accept(..)
   , MakeFundingRequest(..)
   , MandateLetterOffer_Accept(..)
@@ -26,7 +27,6 @@ module Workflow.Origination
   , UnderwritingRequest(..)
   , UnderwritingResult(..)
   , UnderwritingResult_Disclose(..)
-  , UnderwritingResult_OfferMandateLetter(..)
   )
   where
 
@@ -169,11 +169,30 @@ template LoanApplicationProcess
 
       do
         fetchedApplication <- fetch applicationCid
-        assertMsg "Application does data does not match accepted application" $ application == fetchedApplication
+        assertMsg "Application data does not match accepted application" $ application == fetchedApplication
         create UnderwritingRequest with
           underwriter
           application
           applicationCid
+
+    nonconsuming choice LoanApplicationProcess_OfferMandateLetter : ContractId MandateLetterOffer
+      with
+        reportCid : ContractId UnderwritingResult
+      controller application.agent
+      do
+        report <- fetch reportCid
+        assertMsg "Report application does not match accepted application" $ report.application == this.application
+        assertMsg "Report application cid does not match accepted application cid" $ report.applicationCid == this.applicationCid
+        create MandateLetterOffer with
+          agent = application.agent
+          borrower = application.borrower
+          applicationCid
+          reportCid
+          mandateLetter = MandateLetter with
+            instrument = report.report.instrument
+            amount = report.report.amount
+            durationYears = report.report.durationYears
+            prospectus = report.report.prospectus
 
 template UnderwritingRequest
   with
@@ -223,21 +242,6 @@ template UnderwritingResult
     key (underwriter, application.agent, application.uuid) : (Party, Party, Text)
     maintainer key._1
 
-    nonconsuming choice UnderwritingResult_OfferMandateLetter : ContractId MandateLetterOffer
-      controller application.agent
-      do
-        assertMsg "Cannot offer a mandate letter for a declined underwriting" $ result
-        create MandateLetterOffer with
-          agent = application.agent
-          borrower = application.borrower
-          applicationCid
-          reportCid = self
-          mandateLetter = MandateLetter with
-            instrument = report.instrument
-            amount = report.amount
-            durationYears = report.durationYears
-            prospectus = report.prospectus
-      
     nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
       with
         disclose_to : Party
