@@ -30,6 +30,7 @@ import Daml.Script
 
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible
+import Daml.Finance.Instrument.Bond.FixedRate.Factory qualified as FixedRate
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
 import Daml.Finance.Interface.Holding.Base qualified as HoldingBase
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
@@ -50,7 +51,6 @@ import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 import Workflow.SettlementProposal
-import Workflow.Transfer qualified as Transfer
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -378,11 +378,15 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
+  fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
+    provider = agent_charlie
+    observers = Map.empty
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
     with
       now
       routeProviderCid
       settlementFactoryCid
+      fixedRateBondFactoryCid
 
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
 
@@ -573,7 +577,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
     pure (icid, iv)
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
-  let bondCurrency = origination.loanAgreement.bondInstrument.currency
+  let bondCurrency = origination.loanAgreement.bondInstrument.fixedRate.currency
       bondKey = origination.loanAgreement.bondKey
   -- initiate Map Party (ContractId Holding)
   let partyHoldingsMap : Map (Party, InstrumentKey) (Optional (ContractId HoldingBase.Base))
@@ -677,7 +681,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
     lookupNonEmptyUsdHoldings : Show a => Party -> Map Party [(a, Fungible.Fungible)] -> Script (NonEmpty (a, Fungible.Fungible))
     lookupNonEmptyUsdHoldings party settlementFungibleMap =
-      let bondCurrency = origination.loanAgreement.bondInstrument.currency
+      let bondCurrency = origination.loanAgreement.bondInstrument.fixedRate.currency
       in optional
         (fail $ show party <> " not found in settlementFungibleMap: " <> show settlementFungibleMap)
         (\values ->
