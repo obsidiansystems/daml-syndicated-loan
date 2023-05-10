@@ -96,7 +96,7 @@ data PreOriginationStuff = PreOriginationStuff with
 
 -- Pre-origination set-up script that creates:
 -- - the asset in which the loans will be denominated
--- - the issuer and depsitory for the asset (for simplicity, they are the same party)
+-- - the issuer and depository for the asset (for simplicity, they are the same party)
 -- - the accounts for the agents, lenders, and borrowers
 -- - initial assets for the lenders
 preOrigination : LedgerParties -> Script PreOriginationStuff
