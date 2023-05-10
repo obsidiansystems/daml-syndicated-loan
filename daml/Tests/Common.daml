@@ -250,7 +250,7 @@ preOrigination LedgerParties{..} = do
     aliceBondAccount <- submit borrower_alice do
       exerciseCmd aliceBondAccountRequestCid CreateAccount.Accept with
           label = "AliceBond@Bank"
-          description = "Account for Alice's holding of Alice's Bond at Bank" -- Necessary because the custodian of USD and bond accounts differ
+          description = "Account for Alice's holding of Alice's Bond"
           accountFactoryCid = accountFactoryCid
           holdingFactoryCid = holdingFactoryCid
           observers = []
@@ -293,9 +293,7 @@ preOrigination LedgerParties{..} = do
 data Origination = Origination with
   loanAgreement : OriginatedLoanAgreement
   loanAgreementCid : ContractId OriginatedLoanAgreement
-  -- aliceBondAccountKey : AccountKey
-  -- garyBondAccountKey : AccountKey
-  -- garyBondHoldingKey : ContractId B.I
+  originationTime : Time
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
@@ -388,6 +386,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   pure Origination with
     loanAgreement
     loanAgreementCid
+    originationTime = now
 
 type Amount = Decimal
 

@@ -19,6 +19,8 @@ module Workflow.Origination
   , MakeFundingRequest(..)
   , MandateLetterOffer_Accept(..)
   , OriginatedLoanAgreement(..)
+  , OriginatedLoanAgreement_Lifecycle(..)
+  , OriginatedLoanAgreement_LifecycleData(..)
   , PendingLoanAgreement(..)
   , PendingLoanAgreement_Finalize(..)
   , RatePerAnnum(..)
@@ -42,7 +44,8 @@ import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule
 import Daml.Finance.Interface.Instrument.Bond.FixedRate.Types (FixedRate(..))
 import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate
 import Daml.Finance.Interface.Instrument.Base.Instrument qualified as BaseInstrument
-import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as ClaimI
+import Daml.Finance.Interface.Lifecycle.Effect (Effect(..))
+import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim
 import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle
 import Daml.Finance.Interface.Settlement.Factory qualified as Settlement
 import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
@@ -533,18 +536,43 @@ template PendingLoanAgreement
       do
         let bondInstrument = loanAgreementToBondCreate now this.agreement.loanTerms.instrument this.agreement
         bondCid <- exercise fixedRateBondFactoryCid bondInstrument
-
+        let bondKey = InstrumentKey with
+              issuer = bondInstrument.fixedRate.instrument.issuer
+              depository = bondInstrument.fixedRate.instrument.depository
+              id = Id agreement.uuid
+              version = "0"
+            agent = agreement.agent
+            borrower = agreement.borrower
+            lenders = Map.keys agreement.participantsWithAmounts
+            lenderSet = Set.fromList lenders
+        lifecycleRule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
+          create $ LifecycleRule.Rule with
+            providers = Set.fromList [borrower]
+            observers = Map.fromList [("agent", Set.singleton agent)]
+            lifecycler = agent
+            id = Id "LifecycleRule"
+            description = "Rule to lifecycle the bond instrument"
+        claimRule <- fmap (toInterfaceContractId @Claim.I) $
+          create $ Claim.Rule with
+            providers = Set.fromList [borrower]
+            claimers = lenderSet
+            settlers = Set.union (Set.fromList [borrower, agent]) lenderSet
+            routeProviderCid
+            settlementFactoryCid
+            netInstructions = False
         create OriginatedLoanAgreement with
           agreement = this.agreement
           bondInstrument
-          bondKey = InstrumentKey with
-            issuer = bondInstrument.fixedRate.instrument.issuer
-            depository = bondInstrument.fixedRate.instrument.depository
-            id = Id agreement.uuid
-            version = "0"
+          bondKey
           bondCid
           routeProviderCid
           settlementFactoryCid
+          lifecycleRule
+          claimRule
+
+data OriginatedLoanAgreement_LifecycleData = OriginatedLoanAgreement_LifecycleData with
+  newBondKey : Optional InstrumentKey
+  effects : [ContractId Effect]
 
 template OriginatedLoanAgreement
   with
@@ -554,44 +582,27 @@ template OriginatedLoanAgreement
     bondCid : ContractId BaseInstrument.I
     routeProviderCid : ContractId RouteProvider.I
     settlementFactoryCid : ContractId Settlement.F
+    lifecycleRule : ContractId Lifecycle.Lifecycle
+    claimRule : ContractId Claim.Claim
+
   where
     signatory agreement.agent, agreement.borrower, Map.keys agreement.participantsWithAmounts
     ensure sum (Map.values agreement.participantsWithAmounts) == agreement.loanTerms.amount
 
-    nonconsuming choice EnactLifecycling : ()
+    nonconsuming choice OriginatedLoanAgreement_Lifecycle : OriginatedLoanAgreement_LifecycleData
       with today : Date
       controller agreement.agent
       do
-        let agent = agreement.agent
-            borrower = agreement.borrower
-            lenders = Map.keys agreement.participantsWithAmounts
-            lenderSet = Set.fromList lenders
-        
         let parties = Set.fromList (signatory this)
             updateEvent = clockUpdateEvent parties parties today
         updateEventCid <- toInterfaceContractId <$> create updateEvent
-        lifecycleRule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
-          create $ LifecycleRule.Rule with
-            providers = Set.fromList [borrower]
-            observers = Map.empty
-            lifecycler = agent
-            id = Id "LifecycleRule"
-            description = "Rule to lifecycle the bond instrument"
-        claimRule <- fmap (toInterfaceContractId @ClaimI.I) $
-          create $ Claim.Rule with
-            providers = Set.fromList [borrower]
-            claimers = lenderSet
-            settlers = Set.union (Set.fromList [borrower, agent]) lenderSet
-            routeProviderCid
-            settlementFactoryCid
-            netInstructions = False
-        (newBondOpt, [effectCid]) <-
-          exercise lifecycleRule Lifecycle.Evolve with
+        (newBondKey, effects) <- exercise lifecycleRule Lifecycle.Evolve with
             eventCid = updateEventCid
             instrument = bondKey
             observableCids = []
-
-        return ()
+        return OriginatedLoanAgreement_LifecycleData with
+          newBondKey
+          effects
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
@@ -602,8 +613,7 @@ loanAgreementToBondCreate
   -> LoanAgreement
   -> FixedRate.Create
 loanAgreementToBondCreate now usd a =
-  let numberOfParticipants = Map.size a.participantsWithAmounts
-  in FixedRate.Create with
+  FixedRate.Create with
     fixedRate = FixedRate with
       instrument = InstrumentKey with
         depository = a.borrower -- a.agent -- TODO: A bit odd
@@ -618,7 +628,7 @@ loanAgreementToBondCreate now usd a =
       dayCountConvention = Act365Fixed -- TODO: how does this impact servicing rules?
       currency = usd
       lastEventTimestamp = now
-    observers = Map.fromList $ zip (map show [1..numberOfParticipants]) (map Set.singleton (Map.keys a.participantsWithAmounts))
+    observers = Map.fromList [("lenders", Set.fromList (Map.keys a.participantsWithAmounts)), ("agent", Set.singleton a.agent)]
   where
     startDate = toDateUTC now
 

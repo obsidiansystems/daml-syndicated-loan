@@ -3,36 +3,22 @@ module Scripts.Settlement where
 import Daml.Script
 
 import DA.Date (toDateUTC, Month(..), date, toGregorian)
-import DA.Map qualified as Map
 import DA.Set qualified as Set
 import DA.Time (time)
 
-import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule (Rule(..))
-import Daml.Finance.Interface.Claims.Claim qualified as Claim (Claim(..), GetClaims(..))
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I, Base)
-import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I, ClaimEffect(..))
-import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle (Lifecycle, Evolve(..))
+import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (ClaimEffect(..))
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
-import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (Allocate(..), Approve(..))
-import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider (I)
 import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
 import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
-import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
-import Daml.Finance.Interface.Types.Date.RollConvention (Period(..), PeriodEnum(..), RollConventionEnum(..))
-import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..))
-import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
-import Daml.Finance.Lifecycle.Rule.Claim as Claim (Rule(..))
 import Daml.Finance.Settlement.Batch qualified as B
-import Daml.Finance.Settlement.Factory (observers, provider, Factory(Factory))
-import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
-import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 
 import Scripts.Parties
 import Tests.Common
 import Util.Display
 import Util.Script
-import Workflow.Servicing (clockUpdateEvent)
+import Workflow.Origination
 
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
@@ -47,35 +33,6 @@ data SettlementState = SettlementState
     bondInstrument : InstrumentKey
     bobHoldingCid : ContractId Holding.I
   deriving (Eq, Show)
-
--- | Create a schedule for periodic payments.
-createPaymentPeriodicSchedule : Date -> [Text] -> Cal.BusinessDayConventionEnum -> PeriodEnum ->
-  Int -> Date -> Date -> PeriodicSchedule
-createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConvention couponPeriod
-  couponPeriodMultiplier issueDate maturityDate = do
-    -- CREATE_PERIODIC_SCHEDULE_BEGIN
-    let
-      (y, m, d) = toGregorian firstCouponDate
-      periodicSchedule = PeriodicSchedule with
-        businessDayAdjustment =
-          Cal.BusinessDayAdjustment with
-            calendarIds = holidayCalendarIds
-            convention = businessDayConvention
-        effectiveDateBusinessDayAdjustment = None
-        terminationDateBusinessDayAdjustment = None
-        frequency =
-          Sched.Periodic Sched.Frequency with
-            rollConvention = DOM d
-            period = Period with
-              period = couponPeriod
-              periodMultiplier = couponPeriodMultiplier
-        effectiveDate = issueDate
-        firstRegularPeriodStartDate = Some firstCouponDate
-        lastRegularPeriodEndDate = Some maturityDate
-        stubPeriodType = None
-        terminationDate = maturityDate
-    -- CREATE_PERIODIC_SCHEDULE_END
-    periodicSchedule
 
 runCreateParties : Script LedgerParties
 runCreateParties = createParties
@@ -108,82 +65,22 @@ run = do
 
 runBondStep : LedgerParties -> PreOriginationStuff -> Origination -> OriginationSettlement -> Script ()
 runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement{..} = do
-  let borrower = borrower_alice
+  let borrower = orig.loanAgreement.agreement.borrower
       lender = lender_gary
-      agent = agent_charlie
-  {-
-  -- Execute the `runTransfer` script. Bob now holds USD 1000 in his account.
-  TransferState{alice
-    , bank
-    , bob
-    , public
-    , aliceAccount
-    , bobAccount
-    , cashInstrument = usdInstrument
-    , holdingFactoryCid
-    , newHoldingCid = bobHoldingCid} <- runTransfer
-  -}
-  -- 1. Create Route Provider
-  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit borrower do
-      createCmd IntermediatedStatic with
-        provider = borrower
-        observers = Set.fromList [borrower, lender]
-        paths = Map.fromList
-          [ ("LoanInstrument", Hierarchy with
-              rootCustodian = borrower
-              pathsToRootCustodian = [[lender_gary]]
-            )
-          , ("USD", Hierarchy with
-              rootCustodian = fed
-              pathsToRootCustodian = [[borrower_alice], [lender_gary]]
-            )
-          ]
-
-  -- 2. Create Settlement Factory
-  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit borrower do
-    createCmd Factory with
-      provider = borrower
-      observers = Set.fromList [borrower,lender]
-
-  now <- getTime
-  result <- submit borrower_alice $ exerciseCmd (coerceInterfaceContractId @Claim.Claim orig.loanAgreement.bondCid) Claim.GetClaims with actor = borrower_alice
-  debug $ show result
-
+      agent = orig.loanAgreement.agreement.agent
+      now = orig.originationTime
   let (y',m',d') = toGregorian (toDateUTC now)
       today = date (y'+1) m' d'
-      parties = Set.fromList [borrower, lender, agent]
-      updateEvent = clockUpdateEvent parties parties today
-  updateEventCid <- fmap toInterfaceContractId $
-    submitMulti [agent,borrower,lender] [] $ do createCmd updateEvent
 
-  lifecycleRule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
-    submitMulti [agent, borrower] [] $ createCmd $ LifecycleRule.Rule with
-      providers = Set.fromList [borrower]
-      observers = Map.empty
-      lifecycler = agent
-      id = Id "LifecycleRule"
-      description = "Rule to lifecycle the bond instrument"
-
-  claimRule <- fmap (toInterfaceContractId @Claim.I) $
-    submit borrower_alice $ createCmd $ Claim.Rule with
-      providers = Set.fromList [borrower]
-      claimers = Set.singleton lender
-      settlers = Set.fromList [lender, borrower, agent]
-      routeProviderCid
-      settlementFactoryCid
-      netInstructions = False
-
-  (_newBondOpt, [effectCid]) <- submitMulti [agent, borrower] [] $
-    exerciseCmd lifecycleRule Lifecycle.Evolve with
-      eventCid = updateEventCid
-      instrument = orig.loanAgreement.bondKey
-      observableCids = []
+  lifecycleData <- submit agent $ exerciseCmd orig.loanAgreementCid OriginatedLoanAgreement_Lifecycle with
+    today
 
   let lenderGaryBondHoldingBase = toInterfaceContractId @Holding.Base lenderGaryBondHolding
-  -- claimResult <- submitMulti [agent, borrower, lender] [] $
-  claimResult <- submit lender $
-    exerciseCmd claimRule Claim.ClaimEffect with
-      claimer = lender
+      [effectCid] = lifecycleData.effects
+  
+  claimResult <- submit lender_gary $
+    exerciseCmd orig.loanAgreement.claimRule Claim.ClaimEffect with
+      claimer = lender_gary
       holdingCids = [lenderGaryBondHoldingBase]
       effectCid
       batchId = Id "Loan interest payment"
