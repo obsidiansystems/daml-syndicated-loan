@@ -9,8 +9,6 @@ import DA.Time (time)
 
 import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule (Rule(..))
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I, Base)
-import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I(..), ClaimEffect(..))
-import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
 import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I, ClaimEffect(..))
 import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle (Lifecycle, Evolve(..))
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
@@ -192,7 +190,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement
   (bondConsumed2, _) <- submit lender $ exerciseCmd bondConsumed Instruction.Allocate with
     actors = Set.fromList [lender]
     allocation = Pledge lenderGaryBondHoldingBase
-  submit borrower $ exerciseCmd bondConsumed2 Instruction.Approve with
+  submit_ borrower $ exerciseCmd bondConsumed2 Instruction.Approve with
     actors = Set.fromList [borrower]
     approval = DebitSender
 
