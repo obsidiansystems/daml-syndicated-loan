@@ -29,18 +29,19 @@ import Daml.Script
 
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible
-import Daml.Finance.Instrument.Bond.FixedRate.Factory qualified as FixedRate
+import Daml.Finance.Instrument.Bond.FixedRate.Factory qualified as FixedRate (Factory (..))
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate (F)
 import Daml.Finance.Interface.Holding.Base qualified as HoldingBase
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
 import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(..))
 import Daml.Finance.Interface.Holding.Fungible qualified as Fungible (Split(..))
-import Daml.Finance.Interface.Settlement.Factory qualified as Settlement
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction
 import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
 import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge))
 import Daml.Finance.Interface.Types.Common.Types
-import Daml.Finance.Settlement.Factory (Factory(..))
+import Daml.Finance.Settlement.Factory qualified as Settlement (Factory(..))
 import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
 import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 import Daml.Finance.Settlement.Instruction qualified as Settlement
@@ -70,6 +71,7 @@ initialTest parties = do
 data PreOriginationStuff = PreOriginationStuff with
   accountFactoryCid : ContractId Account.F
   holdingFactoryCid : ContractId Holding.F
+  fixedRateBondFactoryCid : ContractId FixedRate.F
   usdInstrument : InstrumentKey
   ledgerAccounts : LedgerAccounts
   hortenseCashHoldingCid : ContractId HoldingBase.I
@@ -107,6 +109,10 @@ preOrigination LedgerParties{..} = do
         provider = fed_ingrid
         observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
             [borrower_alice, borrower_bob]
+
+    fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
+      provider = agent_charlie
+      observers = Map.empty
 
     -- ...for Hortenses's Bank
     hortenseRequestCid <- submit lender_hortense do
@@ -251,6 +257,7 @@ preOrigination LedgerParties{..} = do
       hortenseCashHoldingCid
       garyCashHoldingCid
       aliceCashHoldingCid
+      fixedRateBondFactoryCid
 
 data Origination = Origination with
   loanAgreement : OriginatedLoanAgreement
@@ -339,15 +346,12 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
 
   -- Agent creates a settlement factory
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
-    createCmd Factory with
+    createCmd Settlement.Factory with
       provider = agent_charlie
       observers = Set.fromList [borrower_alice,lender_gary]
   
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
-  fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
-    provider = agent_charlie
-    observers = Map.empty
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
     with
       now
@@ -494,7 +498,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
   -- 2. Create Settlement Factory
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit borrower_alice do
-    createCmd Factory with
+    createCmd Settlement.Factory with
       provider = borrower_alice
       observers = Set.fromList [borrower_bob, borrower_alice]
 
