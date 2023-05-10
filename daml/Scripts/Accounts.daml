@@ -17,4 +17,5 @@ data LedgerAccounts = LedgerAccounts with
     garyBondAccount : AccountKey
     hortenseAccount : AccountKey
     hortenseBondAccount : AccountKey
+    charlieBondAccount : AccountKey
   deriving (Show, Eq, Ord)

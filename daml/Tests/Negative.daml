@@ -3,9 +3,10 @@ module Tests.Negative where
 import Daml.Script
 
 import DA.Foldable
+import DA.Set qualified as Set
 import Workflow.Origination
 
-import Tests.Common(LedgerParties(..), PreOriginationStuff(..))
+import Tests.Common(LedgerParties(..), PreOriginationStuff(..), FundingSelection(..), selectFundingInterests)
 
 originationTests : LedgerParties -> PreOriginationStuff -> Script ()
 originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
@@ -118,16 +119,23 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
 
     -- The lenders now consider their respective requests, and make commitments about how much they are willing to lend
     -- Here we will contrive some differing offers.
-    forA_ fundingRequests $ \(lender, requestCid) -> do
+    fundingInterests <- forA fundingRequests $ \(lender, requestCid) -> do
         Some request <- queryContractId lender requestCid
         let RatePerAnnum maxRate = request.report.maxInterestRate
             (amount, rate)
                 | lender == lender_gary = (request.totalApplicationAmount / 3.0 + 1.0, RatePerAnnum (maxRate - 0.005))
                 | lender == lender_hortense = (request.totalApplicationAmount / 1.5 + 1.0, RatePerAnnum maxRate)
                 | otherwise = (request.totalApplicationAmount, RatePerAnnum maxRate)
-        testExercise ps lender requestCid FundingRequest_Respond with
+        cid <- testExercise ps lender requestCid FundingRequest_Respond with
             amount
             rate
+        -- for convenience we will also pull the contents of the funding interest here
+        Some c <- queryContractId agent_charlie cid
+        pure (cid, c)
+
+    -- Now that Charlie has some funding interest, they can construct a book and propose a loan to alice
+    -- Note that this will likely be done OFF ledger.
+    let FundingSelection{..} = selectFundingInterests aliceLoanApplication fundingInterests
     pure ()
 
 
