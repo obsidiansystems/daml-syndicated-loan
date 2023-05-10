@@ -50,7 +50,7 @@ data LoanApplicationData = LoanApplicationData
 -- | An application for a loan by a borrower
 -- NOTE: Borrowers may create and freely submit loan applications to agents. We do
 -- not limit the ability to apply in any way.
-template LoanApplication
+template LoanApplicationSubmission
   with
     borrower : Party
     agent : Party
@@ -59,7 +59,7 @@ template LoanApplication
     signatory borrower
     observer agent
 
-    nonconsuming choice LoanApplication_CreateUnderwritingRequest : ContractId UnderwritingRequest
+    nonconsuming choice LoanApplicationSubmission_CreateUnderwritingRequest : ContractId UnderwritingRequest
       with
         underwriter : Party
         uuid : Text
@@ -71,7 +71,7 @@ template LoanApplication
           uuid
           loan = this
 
-instance Display LoanApplication where
+instance Display LoanApplicationSubmission where
   display a = T.intercalate "\n" $
     ("Loan Application from " <> show a.borrower <> " to " <> show a.agent) ::
       (map ("> "<>) (T.lines $ display a.applicationData))
@@ -90,7 +90,7 @@ template UnderwritingRequest
     -- We could also use a 'ContractId LoanApplication' to be the unique ID for a 'UnderwritingRequest',
     -- but the borrower has the ability to archive the LoanApplication, and we don't want to give the borrower
     -- the ability to delete a piece of data that is referred to by contracts involving other parties.
-    loan : LoanApplication -- See comment above
+    loan : LoanApplicationSubmission -- See comment above
   where
     signatory loan.agent
     observer underwriter

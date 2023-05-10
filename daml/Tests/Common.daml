@@ -366,7 +366,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
       uuid = "LoanInstrument"
-      loanApplication = LoanApplication with
+      loanApplicationSubmission = LoanApplicationSubmission with
         borrower = borrower_alice
         agent = agent_charlie
         applicationData = LoanApplicationData with
@@ -375,9 +375,9 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
           maxInterestRate = rate
           prospectus = "To test the syndicated loans framework :)"
           durationYears = 10
-  log loanApplication
+  log loanApplicationSubmission
   -- Borrower submits an application for a loan
-  application <- submit borrower_alice $ createCmd loanApplication
+  application <- submit borrower_alice $ createCmd loanApplicationSubmission
   -- Agent coordinating the lending first asks an underwriter for a report
   underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma uuid application)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
@@ -398,7 +398,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     Some fundingInterest <- queryContractId agent_charlie cid
     pure (cid, fundingInterest)
   -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
-  let FundingSelection{..} = selectFundingInterests loanApplication fundingInterests
+  let FundingSelection{..} = selectFundingInterests loanApplicationSubmission fundingInterests
   loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter uuid fundingSelection_ratePerAnnum
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
@@ -506,8 +506,8 @@ makeFundingInterest lender requestCid (amount, rate) = exerciseCmd requestCid Fu
     amount = (amount - 1.0)
     rate
 
-makeUnderwritingRequest : Party -> Text -> ContractId LoanApplication -> Commands (ContractId UnderwritingRequest)
-makeUnderwritingRequest underwriter uuid applicationCid = exerciseCmd applicationCid LoanApplication_CreateUnderwritingRequest with
+makeUnderwritingRequest : Party -> Text -> ContractId LoanApplicationSubmission -> Commands (ContractId UnderwritingRequest)
+makeUnderwritingRequest underwriter uuid applicationCid = exerciseCmd applicationCid LoanApplicationSubmission_CreateUnderwritingRequest with
   underwriter
   uuid
 
@@ -518,7 +518,7 @@ data FundingSelection = FundingSelection
     fundingSelection_declined : [ContractId FundingInterest]
   deriving (Eq, Ord, Show)
 
-selectFundingInterests : LoanApplication -> [(ContractId FundingInterest, FundingInterest)] -> FundingSelection
+selectFundingInterests : LoanApplicationSubmission -> [(ContractId FundingInterest, FundingInterest)] -> FundingSelection
 selectFundingInterests _ [] = error "No interests to fund loan"
 selectFundingInterests application interests =
   let sortedInterests = flip L.sortBy interests $ \(_, fi_a) (_, fi_b) -> compare fi_a.rate fi_b.rate
@@ -532,7 +532,7 @@ selectFundingInterests application interests =
 -- until either the loan amount is satisfied, or the loan cannot be constructed for want of funding at an acceptable
 -- rate of interest.
 buildBook
-  : LoanApplication
+  : LoanApplicationSubmission
   -> RatePerAnnum
   -> Amount
   -> Map (ContractId FundingInterest) Amount

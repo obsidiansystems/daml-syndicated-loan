@@ -18,7 +18,6 @@ import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 
 import Tests.Common(LedgerParties(..), PreOriginationStuff(..))
-import Tests.Common qualified as Common
 
 preoriginationTests : LedgerParties -> Script ()
 preoriginationTests LedgerParties{..} = do
@@ -78,7 +77,7 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
           prospectus = "To validate the syndicated loans framework :)"
           durationYears = 10
         
-        aliceLoanApplication = LoanApplication with
+        aliceLoanApplication = LoanApplicationSubmission with
             borrower = borrower_alice
             agent = agent_charlie
             applicationData = aliceApplicationData
@@ -90,12 +89,12 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
           prospectus = "To break the syndicated loans framework >:)"
           durationYears = 7
         
-        bobLoanApplication1 = LoanApplication with
+        bobLoanApplication1 = LoanApplicationSubmission with
             borrower = borrower_bob
             agent = agent_debbie
             applicationData = bobApplicationData
         
-        bobLoanApplication2 = LoanApplication with
+        bobLoanApplication2 = LoanApplicationSubmission with
             borrower = borrower_bob
             agent = agent_debbie
             applicationData = bobApplicationData
@@ -107,28 +106,37 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- Alice submits her application
     aliceApplicationCid <- submit borrower_alice $ createCmd aliceLoanApplication
     -- Only alice and her agent charlie should be able to see the application
-    testVisibility ps aliceApplicationCid [ borrower_alice, agent_charlie ]
+    testVisibility ps [ borrower_alice, agent_charlie ] aliceApplicationCid
 
-    -- Charlie submits alice's application to an underwriter
+    -- Charlie submits alice's application to an underwriter— NO ONE else has
+    -- the authority to do so.
     -- They use a uuid to keep track of alice's application through the workflow
     let aliceApplicationUuid = "negative_alice"
-    aliceUnderwritingRequestCid <- submit agent_charlie $ Common.makeUnderwritingRequest
-        underwriter_emma
-        aliceApplicationUuid
-        aliceApplicationCid
-
+    aliceUnderwritingRequestCid <- testExercise ps agent_charlie aliceApplicationCid LoanApplicationSubmission_CreateUnderwritingRequest with
+        underwriter = underwriter_emma
+        uuid = aliceApplicationUuid
     -- The underwriter does not see the original application
-    testVisibility ps aliceApplicationCid [ borrower_alice, agent_charlie ]
+    testVisibility ps [ borrower_alice, agent_charlie ] aliceApplicationCid
     -- Nor does alice see the underwriting request
-    testVisibility ps aliceUnderwritingRequestCid [ agent_charlie, underwriter_emma ]
+    testVisibility ps [ agent_charlie, underwriter_emma ] aliceUnderwritingRequestCid
 
-    aliceUnderwritingCid <- submit underwriter_emma $ exerciseCmd aliceUnderwritingRequestCid CreateUnderwritingResult with
+    -- The underwriter produces a result, in this case, they approve Alice's loan
+    -- Note that they are the only one with the authority to exercise this choice.
+    aliceUnderwritingCid <- testExercise ps underwriter_emma aliceUnderwritingRequestCid CreateUnderwritingResult with
       result = True
     -- Once the underwriting is complete, the original request has been archived
-    testVisibility ps aliceUnderwritingRequestCid []
-    -- The report is only visibile to the underwriter and the agent who requested it
-    testVisibility ps aliceUnderwritingCid [ agent_charlie, underwriter_emma ]
+    testVisibility ps [] aliceUnderwritingRequestCid
+    -- The report is only visible to the underwriter and the agent who requested it
+    testVisibility ps [ agent_charlie, underwriter_emma ] aliceUnderwritingCid
+
+
     pure ()
+
+
+-- Explicitly deconstruct the ledger parties so that if it changes, we notice to include them
+partiesList : LedgerParties -> [Party]
+partiesList (LedgerParties a b c d e f g h i) =
+    [ a, b, c, d, e, f, g, h, i ]
 
 -- | Given a contract and a set of parties who should be able to view the contract,
 -- confirms that this is the case and moreover, the other parties of the test script
@@ -136,25 +144,29 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
 testVisibility
     : (HasTemplateTypeRep c, HasFromAnyTemplate c, HasToAnyTemplate c, HasAgreement c)
     => LedgerParties
-    -> ContractId c
     -> [Party] -- ^ Who should be able to see the contract?
+    -> ContractId c
     -> Script ()
-testVisibility LedgerParties{..} cid shouldSee = do
-    let partiesList =
-            [ borrower_alice
-            , borrower_bob
-            , agent_charlie
-            , agent_debbie
-            , underwriter_emma
-            , underwriter_fred
-            , lender_gary
-            , lender_hortense
-            , fed_ingrid
-            ]
-        shouldNotSee = filter (`Prelude.notElem` shouldSee) partiesList
+testVisibility ps shouldSee cid = do
+    let shouldNotSee = filter (`Prelude.notElem` shouldSee) (partiesList ps)
     forA_ shouldSee $ \party -> do
         Some _ <- queryContractId party cid
         pure ()
     forA_ shouldNotSee $ \party -> do
         None <- queryContractId party cid
         pure ()
+
+-- | Given a contract, a choice, and a party who should be able to exercise that choice on that contract,
+-- confirms that no other user can exercise that choice and that user can.
+testExercise
+    : (HasExercise t c b, HasFromAnyTemplate t, HasToAnyTemplate t, HasTemplateTypeRep t, HasToAnyChoice t c b, HasFromAnyChoice t c b)
+    => LedgerParties
+    -> Party
+    -> ContractId t
+    -> c
+    -> Script b
+testExercise ps shouldExercise cid contract_choice = do
+    let shouldNotExercise = filter (/= shouldExercise) (partiesList ps)
+    forA_ shouldNotExercise $ \party -> do
+        submitMustFail party $ exerciseCmd cid contract_choice
+    submit shouldExercise $ exerciseCmd cid contract_choice
