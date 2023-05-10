@@ -293,7 +293,8 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     underwriter = underwriter_emma
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
   -- Agent goes back to the borrower with a mandate letter offer
-  mandateLetterOffer <- submit agent_charlie $ exerciseCmd underwritingResult UnderwritingResult_OfferMandateLetter
+  mandateLetterOffer <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_OfferMandateLetter with
+    reportCid = underwritingResult
   acceptedMandateLetter <- submit borrower_alice $ exerciseCmd mandateLetterOffer MandateLetterOffer_Accept
 
   -- Agent with underwriter's report and accepted mandate letter in hand reaches out to possible lenders
