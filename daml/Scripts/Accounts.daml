@@ -18,3 +18,4 @@ data LedgerAccounts = LedgerAccounts with
     hortenseAccount : AccountKey
     hortenseBondAccount : AccountKey
   deriving (Show, Eq, Ord)
+

@@ -114,26 +114,34 @@ preOrigination LedgerParties{..} = do
         observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
             [borrower_alice, borrower_bob]
 
+    let mkAccount party amount = do
+          accountRequestCid <- submit party do
+            createCmd CreateAccount.Request with owner = party; custodian = fed
+
+          account <- submit fed do
+            exerciseCmd accountRequestCid CreateAccount.Accept with
+              label = show party
+              description = show party <> "'s account at the fed"
+              accountFactoryCid = accountFactoryCid
+              holdingFactoryCid
+              observers = []
+
+          holdingCid <- if (amount > 0.0) 
+              then do
+                allocationRequestCid <- submit party do
+                  createCmd CreditAccount.Request with
+                    account
+                    instrument = usdInstrument
+                    amount
+
+                holdingCid <- submit fed do exerciseCmd allocationRequestCid CreditAccount.Accept
+                pure $ Some holdingCid
+              else pure Nothing
+          return (account, holdingCid)
+
+
     -- ...for Hortenses's Bank
-    hortenseRequestCid <- submit lender_hortense do
-      createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed
-
-    hortenseAccount <- submit fed do
-      exerciseCmd hortenseRequestCid CreateAccount.Accept with
-        label = "Hortense@Bank"
-        description = "Account of Hortense at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid
-        observers = []
-
-    -- allocate funds to Hortense
-    hortenseRequestCid <- submit lender_hortense do
-      createCmd CreditAccount.Request with
-        account = hortenseAccount
-        instrument = usdInstrument
-        amount = 100_000_000.00
-
-    hortenseCashHoldingCid <- submit fed do exerciseCmd hortenseRequestCid CreditAccount.Accept
+    (hortenseAccount, Some hortenseCashHoldingCid) <- mkAccount lender_hortense 100_000_000.00
 
     -- Hortense's bond account (request)
     hortenseBondAccountRequestCid <- submit lender_hortense do
@@ -150,22 +158,7 @@ preOrigination LedgerParties{..} = do
           observers = [borrower_alice]
 
     -- ...for Gary's Bank
-    garyRequestCid <- submit lender_gary do
-      createCmd CreateAccount.Request with owner = lender_gary; custodian = fed
-    garyAccount <- submit fed do
-      exerciseCmd garyRequestCid CreateAccount.Accept with
-        label = "Gary@Bank"
-        description = "Account of Bob at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
-
-    -- allocate funds to Gary
-    garyRequestCid <- submit lender_gary do
-      createCmd CreditAccount.Request with
-        account = garyAccount
-        instrument = usdInstrument
-        amount = 70_000_000.00
+    (garyAccount, Some garyCashHoldingCid) <- mkAccount lender_gary 70_000_000.00
 
     -- Gary's bond account (request)
     garyBondAccountRequestCid <- submit lender_gary do
@@ -181,36 +174,11 @@ preOrigination LedgerParties{..} = do
           holdingFactoryCid = holdingFactoryCid
           observers = [borrower_alice]
 
-    garyCashHoldingCid <- submit fed do exerciseCmd garyRequestCid CreditAccount.Accept
-
     -- ...for Bob's Company
-    bobRequestCid <- submit borrower_bob do
-      createCmd CreateAccount.Request with owner = borrower_bob; custodian = fed
-    bobAccount <- submit fed do
-      exerciseCmd bobRequestCid CreateAccount.Accept with
-        label = "Bob@Fed"
-        description = "Account of Bob at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
+    (bobAccount, None) <- mkAccount borrower_bob 0.0
 
     -- ...for Alice's Company
-    aliceRequestCid <- submit borrower_alice do
-      createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed
-    aliceAccount <- submit fed do
-      exerciseCmd aliceRequestCid CreateAccount.Accept with
-        label = "Alice@Bank"
-        description = "Account of Alice at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
-    aliceRequestCid <- submit borrower_alice do
-      createCmd CreditAccount.Request with
-        account = aliceAccount
-        instrument = usdInstrument
-        amount = 250_684.9315
-
-    aliceCashHoldingCid <- submit fed do exerciseCmd aliceRequestCid CreditAccount.Accept
+    (aliceAccount, Some aliceCashHoldingCid) <- mkAccount borrower_alice 250_684.9315
 
     -- Alices's bond account (request)
     aliceBondAccountRequestCid <- submit borrower_alice do
@@ -227,26 +195,10 @@ preOrigination LedgerParties{..} = do
           observers = []
 
     -- ...for Charlie's agency
-    charlieRequestCid <- submit agent_charlie do
-      createCmd CreateAccount.Request with owner = agent_charlie; custodian = fed
-    charlieAccount <- submit fed do
-      exerciseCmd charlieRequestCid CreateAccount.Accept with
-        label = "Charlie@Bank"
-        description = "Account of Charlie at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
+    (charlieAccount, None) <- mkAccount agent_charlie 0.0
 
     -- ...for Debbie's agency
-    debbieRequestCid <- submit agent_debbie do
-      createCmd CreateAccount.Request with owner = agent_debbie; custodian = fed
-    debbieAccount <- submit fed do
-      exerciseCmd debbieRequestCid CreateAccount.Accept with
-        label = "Debbie@Bank"
-        description = "Account of Debbie at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
+    (debbieAccount, None) <- mkAccount agent_debbie 0.0
 
     let ledgerAccounts = LedgerAccounts with ..
     return $ PreOriginationStuff with
