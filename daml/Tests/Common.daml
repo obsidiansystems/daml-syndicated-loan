@@ -198,6 +198,15 @@ data Origination = Origination with
   loanAgreementCid : ContractId OriginatedLoanAgreement
   originationTime : Time
 
+createLoanApplication : LoanApplicationSubmission -> Script (ContractId LoanApplicationSubmission)
+createLoanApplication loanApplicationSubmission = do
+  log "-- Loan application sent to Agent --"
+  -- Borrower submits an application for a loan
+  application <- submit loanApplicationSubmission.borrower $
+    createCmd loanApplicationSubmission
+  log loanApplicationSubmission
+  pure application
+
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
@@ -212,9 +221,8 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
           maxInterestRate = rate
           prospectus = "To test the syndicated loans framework :)"
           durationYears = 10
-  log loanApplicationSubmission
   -- Borrower submits an application for a loan
-  application <- submit borrower_alice $ createCmd loanApplicationSubmission
+  application <- createLoanApplication loanApplicationSubmission
   -- Agent accepts it
   acceptedApplication <- submit agent_charlie $ exerciseCmd application LoanApplicationSubmission_Accept
     with
