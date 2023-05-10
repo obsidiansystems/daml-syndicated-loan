@@ -207,6 +207,20 @@ createLoanApplication loanApplicationSubmission = do
   log loanApplicationSubmission
   pure application
 
+acceptLoanApplication
+  : Party
+  -> ContractId LoanApplicationSubmission
+  -> Text
+  -> Script (ContractId AcceptedLoanApplication)
+acceptLoanApplication agent application uuid = do
+  log "-- Agent accepts application --"
+  result <- submit agent $ exerciseCmd application LoanApplicationSubmission_Accept
+    with
+      uuid
+  logLedger agent ("Application not found: " <> show result) result
+  return result
+
+
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
@@ -219,14 +233,12 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
           instrument = usdInstrument
           amount
           maxInterestRate = rate
-          prospectus = "To test the syndicated loans framework :)"
+          prospectus = "Loan for acquisition of competitor"
           durationYears = 10
   -- Borrower submits an application for a loan
   application <- createLoanApplication loanApplicationSubmission
   -- Agent accepts it
-  acceptedApplication <- submit agent_charlie $ exerciseCmd application LoanApplicationSubmission_Accept
-    with
-      uuid
+  acceptedApplication <- acceptLoanApplication agent_charlie application uuid
   -- Agent kicks off the loan application process
   applicationProcess <- submit agent_charlie $ exerciseCmd acceptedApplication AcceptedLoanApplication_StartProcess
   -- Agent coordinating the lending first asks an underwriter for a report
@@ -455,7 +467,6 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       f (accum, map') (icid, routedStep) = do
         let key' = routedStep.sender
             optionalReceiverHoldingCid = Map.lookup (key', routedStep.quantity.unit) map'
-        debug $ "allocatedSettleInstructions: " <> show key'
         case optionalReceiverHoldingCid  of
           None -> fail $ "Could not find Holding for " <> show key'
           Some None -> fail $ "Insufficient funds for " <> show key'
@@ -464,13 +475,10 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
               -- Check to make sure routedStep is a step dealing with USD Accounts or Bond Accounts
               exerciseCmd (coerceInterfaceContractId @Fungible receiverHoldingCid) Fungible.Split with
                 amounts = [routedStep.quantity.amount]
-            debug $ "splitCids: " <> show splitCids
-            debug $ "rest: " <> show rest
             assertMsg "we only split a single amount" $ Prelude.length splitCids == 1
             let Some splitCid = DA.List.Total.head splitCids
                 newMap = Map.insert (key', routedStep.quantity.unit) (coerceInterfaceContractId @HoldingBase.Base <$> rest) map'
 
-            debugRaw $ "allocatedSettleInstructions: sender: " <> show key' <> " " <> show splitCid
             allocInstructions <- submit key' do
               exerciseCmd icid Instruction.Allocate with
                 actors = Set.singleton key'
@@ -528,8 +536,6 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       settlementFungibleMap =
         createFungiblesMap
           (map L.head $ L.groupOn fst $ L.sortOn fst fungibles) -- We need to do deduplicate since a "query" by two different parties may return the same contract (if it's visible by multiple parties)
-
-  debugRaw $ "settlementFungibleMap: " <> show settlementFungibleMap
 
   borrowerAliceUsdHolding' : NonEmpty (ContractId Fungible.Fungible, Fungible.Fungible) <- lookupNonEmptyUsdHoldings borrower_alice settlementFungibleMap
   lenderGaryBondHolding' : (ContractId Fungible.Fungible, Fungible.Fungible) <- lookupSingleBondHolding lender_gary settlementFungibleMap

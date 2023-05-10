@@ -1,6 +1,7 @@
 module Workflow.Origination
   ( AcceptedLoan(..)
   , AcceptedLoan_SignAgreement(..)
+  , AcceptedLoanApplication(..)
   , AcceptedLoanApplication_StartProcess(..)
   , AcceptedMandateLetter(..)
   , AcceptedMandateLetter_CreateOffer(..)
@@ -122,7 +123,7 @@ template LoanApplicationSubmission
 instance Display LoanApplicationSubmission where
   display a = T.intercalate "\n" $
     ("Loan Application from " <> show a.borrower <> " to " <> show a.agent) ::
-      (map ("> "<>) (T.lines $ display a.applicationData))
+      displayLinesWith ("> "<>) a.applicationData
 
 instance Display LoanApplicationData where
   display a = T.intercalate "\n"
@@ -149,6 +150,11 @@ template AcceptedLoanApplication
           borrower
           application = this
           applicationCid = self
+
+instance Display AcceptedLoanApplication where
+  display a = T.intercalate "\n" $
+    (show a.agent <> " accepted loan application from " <> show a.borrower) ::
+      displayLinesWith ("> "<>) a.applicationData
 
 -- | This template represents the loan application process hidden from the borrower. To maintain anonymity between
 -- the borrower and other parties, such as the underwriters and lenders, they are not a signatory of such contracts.
