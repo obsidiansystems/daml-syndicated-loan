@@ -1,4 +1,10 @@
-module Workflow.SettlementProposal where
+module Workflow.SettlementProposal
+  ( SettlementProposal(..)
+  , Accept_Borrower(..)
+  , Accept_Lender(..)
+  , ExecuteSettlement(..)
+  )
+  where
 
 import DA.Functor
 import DA.List (sort)
@@ -17,28 +23,29 @@ import Workflow.Origination
 
 template SettlementProposal
   with
-    loan : LoanAgreement
+    loan : OriginatedLoanAgreement
     sigAccumulator: [Party] -- Acquire acceptance from all parties
     routeProviderCid : ContractId RouteProvider.I
     settlementFactoryCid : ContractId Settlement.F
     bond : InstrumentKey
   where
-    signatory loan.borrower :: sigAccumulator
-    observer loan.borrower :: map fst (Map.toList loan.participantsWithAmounts)
+    signatory loan.agreement.borrower :: sigAccumulator
+    observer loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
 
     choice Accept_Borrower : Either (ContractId SettlementProposal) (ContractId SettlementProposal, ContractId Batch.I, [ContractId Instruction.I])
-      controller loan.borrower
+      controller loan.agreement.borrower
       do
-        let lenders = (map fst $ Map.toList loan.participantsWithAmounts)
-            lendersAndBorrowers = loan.borrower::lenders
+        let borrower = loan.agreement.borrower
+            lenders = Map.keys loan.agreement.participantsWithAmounts
+            lendersAndBorrowers = borrower::lenders
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         debug $ show lendersAndBorrowers
         if (sort sigAccumulator) == (sort lenders) then do
-          (batchCid, settleInstructions) <- settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
-          updatedContract <- create this with sigAccumulator = loan.borrower::sigAccumulator
+          (batchCid, settleInstructions) <- settleTransactions loan.agreement lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
+          updatedContract <- create this with sigAccumulator = borrower::sigAccumulator
           return $ Right (updatedContract, batchCid, settleInstructions)
         else do
-          updatedContract <- create this with sigAccumulator = loan.borrower::sigAccumulator
+          updatedContract <- create this with sigAccumulator = borrower::sigAccumulator
           return $ Left updatedContract
 
     choice Accept_Lender : Either (ContractId SettlementProposal) (ContractId SettlementProposal, ContractId Batch.I, [ContractId Instruction.I])
@@ -46,12 +53,14 @@ template SettlementProposal
         currLender : Party
       controller currLender
       do
-        assertMsg "Must be an authorized lender" $ elem currLender (map fst $ Map.toList loan.participantsWithAmounts)
-        let lendersAndBorrowers : [Party] = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
+        let borrower = loan.agreement.borrower
+            lenders = Map.keys loan.agreement.participantsWithAmounts
+        assertMsg "Must be an authorized lender" $ elem currLender lenders
+        let lendersAndBorrowers : [Party] = borrower :: lenders
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         debug $ show lendersAndBorrowers
-        if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts) then do
-          (batchCid, settleInstructions) <- settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
+        if sigAccumulator == borrower :: lenders then do
+          (batchCid, settleInstructions) <- settleTransactions loan.agreement lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
           updatedContract <- create this with sigAccumulator = currLender::sigAccumulator
           return $ Right (updatedContract, batchCid, settleInstructions)
 
@@ -62,20 +71,20 @@ template SettlementProposal
 
     choice Decline : ()
       -- ^ Decline the request.
-      controller loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
+      controller loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
       do pure ()
 
     choice Withdraw : ()
       -- ^ Withdraw the request.
-      controller loan.borrower
+      controller loan.agreement.borrower
       do pure ()
     choice ExecuteSettlement : [ContractId Base.Base]
       with
         batchCid : ContractId Batch.I
-      controller loan.borrower
+      controller loan.agreement.borrower
       do
         exercise batchCid Batch.Settle with
-          actors = Set.singleton loan.borrower
+          actors = Set.singleton loan.agreement.borrower
 
 settleTransactions :
   (HasField "agent" r1 Party

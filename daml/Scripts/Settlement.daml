@@ -3,18 +3,19 @@ module Scripts.Settlement where
 import Daml.Script
 
 import DA.Date (toDateUTC, Month(..), date, toGregorian)
-import qualified DA.Map as Map
-import qualified DA.Set as Set
+import DA.Map qualified as Map
+import DA.Set qualified as Set
 import DA.Time (time)
 
 import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule (Rule(..))
-import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
-import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I(..), ClaimEffect(..))
+import Daml.Finance.Interface.Claims.Claim qualified as Claim (Claim(..), GetClaims(..))
+import Daml.Finance.Interface.Holding.Base qualified as Holding (I, Base)
+import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I, ClaimEffect(..))
 import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle (Lifecycle, Evolve(..))
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
-import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F(..))
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (Allocate(..), Approve(..))
-import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider (I(..))
+import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider (I)
 import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
 import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
 import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
@@ -30,6 +31,7 @@ import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedS
 import Tests.Common
 import Tests.IDE
 import Util.Display
+import Util.Script
 import Workflow.Servicing (clockUpdateEvent)
 
 -- | Helper container used to transfer state from one script to another.
@@ -93,9 +95,9 @@ runOrigination = do
 run : Script ()
 run = do
   setTime (time (date 2023 Apr 12) 4 4 4)
-  p <- createParties
-  po <- preOrigination p
-  runBondStep p po
+  (p, po, o) <- runOrigination
+  originationSettlement <- settleLoan p po o
+  runBondStep p po o originationSettlement
   return ()
 
 -- | Test script that
@@ -104,8 +106,8 @@ run = do
 -- 3. credits a token holding to Alice in her bank account
 -- 4. atomically exchanges the token against the cash holding
 
-runBondStep : LedgerParties -> PreOriginationStuff -> Script ()
-runBondStep LedgerParties{..} PreOriginationStuff{..} = do
+runBondStep : LedgerParties -> PreOriginationStuff -> Origination -> OriginationSettlement -> Script ()
+runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement{..} = do
   let borrower = borrower_alice
       lender = lender_gary
       agent = agent_charlie
@@ -141,11 +143,11 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit borrower do
     createCmd Factory with
       provider = borrower
-      observers = Set.fromList [borrower]
+      observers = Set.fromList [borrower,lender]
 
-
-  orig <- origination (LedgerParties{..}) (PreOriginationStuff{..})
   now <- getTime
+  result <- submit borrower_alice $ exerciseCmd (toInterfaceContractId @Claim.Claim orig.loanAgreement.bondCid) Claim.GetClaims with actor = borrower_alice
+  debug $ show result
 
   let (y',m',d') = toGregorian (toDateUTC now)
       today = date (y'+1) m' d'
@@ -171,16 +173,18 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       settlementFactoryCid
       netInstructions = False
 
-  (newBondOpt, [effectCid]) <- submitMulti [agent, borrower] [] $
+  (_newBondOpt, [effectCid]) <- submitMulti [agent, borrower] [] $
     exerciseCmd lifecycleRule Lifecycle.Evolve with
       eventCid = updateEventCid
-      instrument = orig.bond.reference
+      instrument = orig.loanAgreement.bondKey
       observableCids = []
 
-  claimResult <- submitMulti [agent, borrower, lender] [] $
+  let lenderGaryBondHoldingBase = toInterfaceContractId @Holding.Base lenderGaryBondHolding
+  -- claimResult <- submitMulti [agent, borrower, lender] [] $
+  claimResult <- submit lender $
     exerciseCmd claimRule Claim.ClaimEffect with
       claimer = lender
-      holdingCids = [orig.garyBondHoldingKey]
+      holdingCids = [lenderGaryBondHoldingBase]
       effectCid
       batchId = Id "Loan interest payment"
 
@@ -189,31 +193,31 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
 
   (bondConsumed2, _) <- submit lender $ exerciseCmd bondConsumed Instruction.Allocate with
     actors = Set.fromList [lender]
-    allocation = Pledge orig.garyBondHoldingKey
-  submit borrower $ exerciseCmd bondConsumed2 Instruction.Approve with
+    allocation = Pledge lenderGaryBondHoldingBase
+  submit_ borrower $ exerciseCmd bondConsumed2 Instruction.Approve with
     actors = Set.fromList [borrower]
     approval = DebitSender
 
   (bondProduced2, _) <- submit borrower $ exerciseCmd bondProduced Instruction.Allocate with
     actors = Set.fromList [borrower]
     allocation = CreditReceiver
-  submit lender $ exerciseCmd bondProduced2 Instruction.Approve with
+  submit_ lender $ exerciseCmd bondProduced2 Instruction.Approve with
     actors = Set.fromList [lender]
-    approval = TakeDelivery orig.garyBondAccountKey
+    approval = TakeDelivery ledgerAccounts.garyBondAccount
 
   (couponProduced2, _) <- submit borrower $ exerciseCmd couponProduced Instruction.Allocate with
     actors = Set.fromList [borrower]
     allocation = Pledge aliceCashHoldingCid
-  submit lender $ exerciseCmd couponProduced2 Instruction.Approve with
+  submit_ lender $ exerciseCmd couponProduced2 Instruction.Approve with
     actors = Set.fromList [lender]
     approval = TakeDelivery ledgerAccounts.garyAccount
 
-  batch <- logLedger
+  logLedger
     borrower_alice
     ("No batch found for: " <> show claimResult.batchCid)
     (fromInterfaceContractId @B.Batch claimResult.batchCid)
 
-  submitMulti [borrower_alice, agent_charlie] [] do
+  submitMulti_ [borrower_alice, agent_charlie] [] do
     exerciseCmd claimResult.batchCid Batch.Settle with
       actors = Set.fromList [borrower_alice, agent_charlie]
 

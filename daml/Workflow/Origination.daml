@@ -1,4 +1,36 @@
-module Workflow.Origination where
+module Workflow.Origination
+  ( AcceptedLoan(..)
+  , AcceptedLoan_SignAgreement(..)
+  , AcceptedLoanApplication_StartProcess(..)
+  , AcceptedMandateLetter(..)
+  , AcceptedMandateLetter_CreateOffer(..)
+  , CreateUnderwritingResult(..)
+  , FundingInterest(..)
+  , FundingInterest_Decline(..)
+  , FundingInterest_SignAgreement(..)
+  , FundingRequest(..)
+  , FundingRequest_Respond(..)
+  , LoanAgreement(..)
+  , LoanApplicationSubmission(..)
+  , LoanApplicationData(..)
+  , LoanApplicationProcess_CreateUnderwritingRequest(..)
+  , LoanApplicationSubmission_Accept(..)
+  , MakeFundingRequest(..)
+  , MandateLetterOffer_Accept(..)
+  , OriginatedLoanAgreement(..)
+  , PendingLoanAgreement(..)
+  , PendingLoanAgreement_Finalize(..)
+  , RatePerAnnum(..)
+  , SyndicatedLoanOffer(..)
+  , SyndicatedLoanOffer_Accept(..)
+  , UnderwritingRequest(..)
+  , UnderwritingResult(..)
+  , UnderwritingResult_Disclose(..)
+  , UnderwritingResult_OfferMandateLetter(..)
+  )
+  where
+
+import Prelude hiding (agreement, key)
 
 import DA.Date (date, toGregorian, toDateUTC)
 import DA.Map (Map)
@@ -6,7 +38,13 @@ import DA.Map qualified as Map
 import DA.Set qualified as Set
 import DA.Text qualified as T
 
+import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
+import Daml.Finance.Interface.Instrument.Base.Instrument qualified as BaseInstrument
+import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as ClaimI
+import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement
+import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
 import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..), BusinessDayConventionEnum(..))
 import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
@@ -14,8 +52,10 @@ import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(..), Period(..))
 import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), PeriodicSchedule(..))
 import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
+import Daml.Finance.Lifecycle.Rule.Claim qualified as Claim
 
 import Util.Display
+import Workflow.Servicing
 import Workflow.Util
 
 -- ### TODO
@@ -50,7 +90,7 @@ data LoanApplicationData = LoanApplicationData
 -- | An application for a loan by a borrower
 -- NOTE: Borrowers may create and freely submit loan applications to agents. We do
 -- not limit the ability to apply in any way.
-template LoanApplication
+template LoanApplicationSubmission
   with
     borrower : Party
     agent : Party
@@ -59,19 +99,23 @@ template LoanApplication
     signatory borrower
     observer agent
 
-    nonconsuming choice LoanApplication_CreateUnderwritingRequest : ContractId UnderwritingRequest
+    choice LoanApplicationSubmission_Reject : ()
+      controller agent
+      do
+        pure ()
+
+    choice LoanApplicationSubmission_Accept : ContractId AcceptedLoanApplication
       with
-        underwriter : Party
         uuid : Text
       controller agent
-
       do
-        create UnderwritingRequest with
-          underwriter
+        create AcceptedLoanApplication with
+          agent
+          borrower
+          applicationData
           uuid
-          loan = this
 
-instance Display LoanApplication where
+instance Display LoanApplicationSubmission where
   display a = T.intercalate "\n" $
     ("Loan Application from " <> show a.borrower <> " to " <> show a.agent) ::
       (map ("> "<>) (T.lines $ display a.applicationData))
@@ -82,19 +126,65 @@ instance Display LoanApplicationData where
     , "For: " <> a.prospectus
     ]
 
+-- | This template represents a loan application that has been accepted by an agent.
+-- This will be used as a reference throughout the application workflow as evidence that
+-- the agent has commited to processing the application that the borrower has authorized.
+template AcceptedLoanApplication
+  with
+    borrower : Party
+    agent : Party
+    applicationData : LoanApplicationData
+    uuid : Text
+  where
+    signatory agent, borrower
+    nonconsuming choice AcceptedLoanApplication_StartProcess : ContractId LoanApplicationProcess
+      controller agent
+      do
+        create LoanApplicationProcess with
+          agent
+          borrower
+          application = this
+          applicationCid = self
+
+-- | This template represents the loan application process hidden from the borrower. To maintain anonymity between
+-- the borrower and other parties, such as the underwriters and lenders, they are not a signatory of such contracts.
+-- If they were, they would have divulged to them the existence of, for example, an underwriting request made about
+-- their application.
+--
+-- Unfortunately this means that the underwriters and lenders at this stage cannot verify that the agent did not fabricate
+-- the application. Only when every party has provided their input into the process, and the final loan agreement is
+-- constructed, will the validity of the loan application be established.
+template LoanApplicationProcess
+  with
+    agent : Party
+    borrower : Party
+    application : AcceptedLoanApplication
+    applicationCid : ContractId AcceptedLoanApplication
+  where
+    signatory agent
+    nonconsuming choice LoanApplicationProcess_CreateUnderwritingRequest : ContractId UnderwritingRequest
+      with
+        underwriter : Party
+      controller agent
+
+      do
+        fetchedApplication <- fetch applicationCid
+        assertMsg "Application does data does not match accepted application" $ application == fetchedApplication
+        create UnderwritingRequest with
+          underwriter
+          application
+          applicationCid
+
 template UnderwritingRequest
   with
     underwriter : Party
-    uuid : Text
-    -- Generated client-side by the agent so that each 'LoanApplication' has unique ID.
-    -- We could also use a 'ContractId LoanApplication' to be the unique ID for a 'UnderwritingRequest',
-    -- but the borrower has the ability to archive the LoanApplication, and we don't want to give the borrower
-    -- the ability to delete a piece of data that is referred to by contracts involving other parties.
-    loan : LoanApplication -- See comment above
+    applicationCid : ContractId AcceptedLoanApplication
+    application : AcceptedLoanApplication
+
   where
-    signatory loan.agent
+    signatory application.agent
     observer underwriter
-    key (loan.agent, uuid) : (Party, Text)
+    key (application.agent, application.uuid) : (Party, Text)
     maintainer key._1
 
     choice UnderwritingRequest_Cancel : ()
@@ -109,41 +199,39 @@ template UnderwritingRequest
       do
         create UnderwritingResult with
           underwriter
-          agent = loan.agent
-          borrower = loan.borrower
+          applicationCid
+          application
           -- TODO: Do not just take from the application
           report = UnderwritingReport with
-            instrument = this.loan.applicationData.instrument
-            amount = this.loan.applicationData.amount
-            durationYears = this.loan.applicationData.durationYears
-            maxInterestRate = this.loan.applicationData.maxInterestRate
-            prospectus = this.loan.applicationData.prospectus
-          uuid
+            instrument = this.application.applicationData.instrument
+            amount = this.application.applicationData.amount
+            durationYears = this.application.applicationData.durationYears
+            maxInterestRate = this.application.applicationData.maxInterestRate
+            prospectus = this.application.applicationData.prospectus
           result
 
 -- | This template represents the result of an underwriting report signed by an underwriter
 template UnderwritingResult
   with
     underwriter : Party
-    uuid : Text
-    agent : Party
-    borrower : Party
+    applicationCid : ContractId AcceptedLoanApplication
+    application : AcceptedLoanApplication
     report : UnderwritingReport
     result : Bool
   where
-    signatory agent, underwriter
-    key (underwriter, agent, uuid) : (Party, Party, Text)
+    signatory application.agent, underwriter
+    key (underwriter, application.agent, application.uuid) : (Party, Party, Text)
     maintainer key._1
 
     nonconsuming choice UnderwritingResult_OfferMandateLetter : ContractId MandateLetterOffer
-      controller agent
+      controller application.agent
       do
         assertMsg "Cannot offer a mandate letter for a declined underwriting" $ result
         create MandateLetterOffer with
-          underwriter
-          agent
-          borrower
-          report = self
+          agent = application.agent
+          borrower = application.borrower
+          applicationCid
+          reportCid = self
           mandateLetter = MandateLetter with
             instrument = report.instrument
             amount = report.amount
@@ -154,14 +242,14 @@ template UnderwritingResult
       with
         disclose_to : Party
         mandateLetterCid : ContractId AcceptedMandateLetter
-      controller agent
+      controller application.agent
       do
         letter <- fetch mandateLetterCid
-        assertMsg "Provided mandate letter was not for this underwriting report" $ letter.report == self
+        assertMsg "Provided mandate letter was not for this underwriting report" $ letter.reportCid == self
         create UnderwritingDisclosure with
           underwriter
-          agent
-          uuid
+          agent = application.agent
+          uuid = application.uuid
           report = this.report
           participant = disclose_to
 
@@ -186,38 +274,40 @@ data MandateLetter = MandateLetter
   deriving (Eq, Ord, Show)
 
 -- | This template represents an offer from the agent to a borrower to continue the loan application process under
--- the provided terms. The underwriter has vouched for the legitimacy of this mandate letter.
+-- the provided terms. The underwriter has vouched for the legitimacy of this mandate letter, but we do not
+-- reveal their identity here. We maintain a reference to the report so that we can audit validity separately.
 template MandateLetterOffer
   with
     agent : Party
-    underwriter : Party
     borrower : Party
-    report : ContractId UnderwritingResult
+    applicationCid : ContractId AcceptedLoanApplication
+    reportCid : ContractId UnderwritingResult
     mandateLetter : MandateLetter
   where
-    signatory agent, underwriter
+    signatory agent
     observer borrower
     choice MandateLetterOffer_Accept : ContractId AcceptedMandateLetter
       controller borrower
       do
+        _ <- fetch applicationCid
         create AcceptedMandateLetter with ..
     choice MandateLetterOffer_Reject : ()
       controller borrower
       do
         pure ()
 
--- | This template represents a mandate letter that has been offered by the agent to the borrower, signed by the underwriter,
+-- | This template represents a mandate letter that has been offered by the agent to the borrower,
 -- and accepted by the borrower. It represents on-chain the consent of the borrower for the agent to reach out to lenders
 -- for consideration of the terms described.
 template AcceptedMandateLetter
   with
     agent : Party
-    underwriter : Party
     borrower : Party
-    report : ContractId UnderwritingResult
+    applicationCid : ContractId AcceptedLoanApplication
+    reportCid : ContractId UnderwritingResult
     mandateLetter : MandateLetter
   where
-    signatory agent, underwriter, borrower
+    signatory agent, borrower
     choice AcceptedMandateLetter_CreateOffer : ContractId SyndicatedLoanOffer
       with
         rate : RatePerAnnum
@@ -251,14 +341,14 @@ template UnderwritingDisclosure
 
     nonconsuming choice MakeFundingRequest : ContractId FundingRequest
       with
-        participant : Party
+        requestee : Party
       controller agent
       do
         create FundingRequest with
           agent = agent
           uuid = uuid
           totalApplicationAmount = report.amount
-          participant
+          participant = requestee
           underwrite = self
 
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
@@ -412,15 +502,76 @@ template PendingLoanAgreement
       do
         create this with
           signed = signer :: (this.signed)
-    choice PendingLoanAgreement_Finalize : (ContractId LoanAgreement, Bond)
+    choice PendingLoanAgreement_Finalize : ContractId OriginatedLoanAgreement
+      with
+        now : Time
+        routeProviderCid : ContractId RouteProvider.I
+        settlementFactoryCid : ContractId Settlement.F   
       controller agreement.agent
       do
-        a <- create this.agreement
-        now <- getTime -- TODO: reconsider if this is appropriate
-        debug $ show this.agreement
-        let bond = loanAgreementToBond now this.agreement.loanTerms.instrument this.agreement
-        b <- createBond bond
-        return (a,b)
+        let bondInstrument = loanAgreementToBond now this.agreement.loanTerms.instrument this.agreement
+        bondCid <- create bondInstrument
+        let bondCid' = toInterfaceContractId @BaseInstrument.I bondCid
+        bondKey <- createReference
+          bondCid'
+          bondInstrument.depository
+          bondInstrument.issuer
+          bondInstrument.observers
+
+        create OriginatedLoanAgreement with
+          agreement = this.agreement
+          bondInstrument
+          bondKey
+          bondCid
+          routeProviderCid
+          settlementFactoryCid
+
+template OriginatedLoanAgreement
+  with
+    agreement : LoanAgreement
+    bondInstrument : BondInstrument
+    bondKey : InstrumentKey
+    bondCid : ContractId BondInstrument
+    routeProviderCid : ContractId RouteProvider.I
+    settlementFactoryCid : ContractId Settlement.F
+  where
+    signatory agreement.agent, agreement.borrower, Map.keys agreement.participantsWithAmounts
+    ensure sum (Map.values agreement.participantsWithAmounts) == agreement.loanTerms.amount
+
+    nonconsuming choice EnactLifecycling : ()
+      with today : Date
+      controller agreement.agent
+      do
+        let agent = agreement.agent
+            borrower = agreement.borrower
+            lenders = Map.keys agreement.participantsWithAmounts
+            lenderSet = Set.fromList lenders
+        
+        let parties = Set.fromList (signatory this)
+            updateEvent = clockUpdateEvent parties parties today
+        updateEventCid <- toInterfaceContractId <$> create updateEvent
+        lifecycleRule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
+          create $ LifecycleRule.Rule with
+            providers = Set.fromList [borrower]
+            observers = Map.empty
+            lifecycler = agent
+            id = Id "LifecycleRule"
+            description = "Rule to lifecycle the bond instrument"
+        claimRule <- fmap (toInterfaceContractId @ClaimI.I) $
+          create $ Claim.Rule with
+            providers = Set.fromList [borrower]
+            claimers = lenderSet
+            settlers = Set.union (Set.fromList [borrower, agent]) lenderSet
+            routeProviderCid
+            settlementFactoryCid
+            netInstructions = False
+        (newBondOpt, [effectCid]) <-
+          exercise lifecycleRule Lifecycle.Evolve with
+            eventCid = updateEventCid
+            instrument = bondKey
+            observableCids = []
+
+        return ()
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
@@ -467,7 +618,7 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
   couponPeriodMultiplier issueDate maturityDate = do
     -- CREATE_PERIODIC_SCHEDULE_BEGIN
     let
-      (y, m, d) = toGregorian firstCouponDate
+      (_y, _m, d) = toGregorian firstCouponDate
       periodicSchedule = PeriodicSchedule with
         businessDayAdjustment =
           Cal.BusinessDayAdjustment with

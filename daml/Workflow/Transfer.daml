@@ -1,6 +1,11 @@
-module Workflow.Transfer where
+module Workflow.Transfer
+  ( Request(..)
+  , Accept(..)
+  )
+  where
 
 import DA.Set (fromList)
+
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
 import Daml.Finance.Interface.Holding.Transferable qualified as Transferable (I, Transfer(..))
 import Daml.Finance.Interface.Holding.Util (getAmount, getInstrument)
