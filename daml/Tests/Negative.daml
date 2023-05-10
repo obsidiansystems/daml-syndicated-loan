@@ -108,7 +108,7 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- Alice submits her application
     aliceApplicationCid <- submit borrower_alice $ createCmd aliceLoanApplication
     -- Only alice and her agent charlie should be able to see the application
-    testVisibility aliceApplicationCid (visibleTo ps [ borrower_alice, agent_charlie ])
+    testVisibility ps aliceApplicationCid [ borrower_alice, agent_charlie ]
 
     -- Charlie submits alice's application to an underwriter
     -- They use a uuid to keep track of alice's application through the workflow
@@ -119,14 +119,22 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
         aliceApplicationCid
 
     -- The underwriter does not see the original application
-    testVisibility aliceApplicationCid (visibleTo ps [ borrower_alice, agent_charlie ])
+    testVisibility ps aliceApplicationCid [ borrower_alice, agent_charlie ]
     -- Nor does alice see the underwriting request
-    testVisibility aliceUnderwritingRequestCid (visibleTo ps [ agent_charlie, underwriter_emma ])
+    testVisibility ps aliceUnderwritingRequestCid [ agent_charlie, underwriter_emma ]
 
     pure ()
 
-visibleTo : LedgerParties -> [Party] -> VisibilityTest
-visibleTo LedgerParties{..} shouldSee =
+-- | Given a contract and a set of parties who should be able to view the contract,
+-- confirms that this is the case and moreover, the other parties of the test script
+-- cannot see the contract.
+testVisibility
+    : (HasTemplateTypeRep c, HasFromAnyTemplate c, HasToAnyTemplate c, HasAgreement c)
+    => LedgerParties
+    -> ContractId c
+    -> [Party] -- ^ Who should be able to see the contract?
+    -> Script ()
+testVisibility LedgerParties{..} cid shouldSee = do
     let partiesList =
             [ borrower_alice
             , borrower_bob
@@ -139,19 +147,6 @@ visibleTo LedgerParties{..} shouldSee =
             , fed_ingrid
             ]
         shouldNotSee = filter (`Prelude.notElem` shouldSee) partiesList
-    in VisibilityTest with ..
-
-data VisibilityTest = VisibilityTest
-  with
-    shouldSee : [Party]
-    shouldNotSee : [Party]
-
-testVisibility
-    : (HasTemplateTypeRep c, HasFromAnyTemplate c, HasToAnyTemplate c, HasAgreement c)
-    => ContractId c
-    -> VisibilityTest
-    -> Script ()
-testVisibility cid VisibilityTest{..} = do
     forA_ shouldSee $ \party -> do
         Some _ <- queryContractId party cid
         pure ()
