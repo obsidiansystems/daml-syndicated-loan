@@ -19,7 +19,7 @@ import DA.Action
 import DA.Foldable
 import DA.Functor
 import DA.List qualified as L
-import DA.List.Total qualified 
+import DA.List.Total qualified
 import DA.Map (Map)
 import DA.Map qualified as Map
 import DA.NonEmpty (NonEmpty)
@@ -478,8 +478,8 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     (Map.keys fundingSelection_selected)
   -- Agent declines leftover funding interests
   submit agent_charlie $ forA_ fundingSelection_declined $ \declinedCid -> exerciseCmd declinedCid FundingInterest_Decline
-  
-  
+
+
   -- Agent creates a route provider explaining how payments should flow between involved parties
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
       createCmd IntermediatedStatic with
@@ -501,7 +501,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     createCmd Factory with
       provider = agent_charlie
       observers = Set.fromList [borrower_alice,lender_gary]
-  
+
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
@@ -674,23 +674,20 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
     exerciseCmd aliceBondRequestCid CreditAccount.Accept
 
   -- Get sig of participating lender
-  Left settlementProposalCid2 <- submit lender_hortense do
-    exerciseCmd settlementProposalCid $ Accept_Lender lender_hortense
+  settlementProposalCid2 <- submit lender_hortense do
+    exerciseCmd settlementProposalCid $ Add_Signature lender_hortense
 
   -- Get sig of participating lender
-  Left settlementProposalCid3 <- submit lender_gary do
-    exerciseCmd settlementProposalCid2 $ Accept_Lender lender_gary
+  settlementProposalCid3 <- submit lender_gary do
+    exerciseCmd settlementProposalCid2 $ Add_Signature lender_gary
 
-  -- Get sig of participating borrower, all signatures should have been accumulated, tx instructions should be produced
-  -- TODO: Should case to ensure it actually is 'Some' instead of 'None'
-  -- Right (batchCid, instructionCids) <- submit borrower_alice do
-  --   exerciseCmd settlementProposalCid3 Accept_Borrower
-  eitherUpdatedContractOrBatchInstructions <- submit borrower_alice do
-    exerciseCmd settlementProposalCid3 Accept_Borrower
+  -- Get sig of participating borrower
+  allSignatureSettlementCid <- submit borrower_alice do
+    exerciseCmd settlementProposalCid3 $ Add_Signature borrower_alice
 
-  (allSignatureSettlementCid, batchCid, instructionCids) <- case eitherUpdatedContractOrBatchInstructions of
-    Left err -> fail $ "All signatures should be present " <> (show err)
-    Right batchInstructions -> return batchInstructions
+  -- Settle
+  (batchCid, instructionCids) <- submit borrower_alice do
+    exerciseCmd allSignatureSettlementCid Settle
 
   -- Prepare to construct Allocate instructions
   -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids

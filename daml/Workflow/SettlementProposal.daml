@@ -1,7 +1,7 @@
 module Workflow.SettlementProposal
   ( SettlementProposal(..)
-  , Accept_Borrower(..)
-  , Accept_Lender(..)
+  , Add_Signature(..)
+  , Settle(..)
   , ExecuteSettlement(..)
   )
   where
@@ -32,42 +32,23 @@ template SettlementProposal
     signatory loan.agreement.borrower :: sigAccumulator
     observer loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
 
-    choice Accept_Borrower : Either (ContractId SettlementProposal) (ContractId SettlementProposal, ContractId Batch.I, [ContractId Instruction.I])
-      controller loan.agreement.borrower
+    nonconsuming choice Settle : (ContractId Batch.I, [ContractId Instruction.I])
+      controller loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
       do
-        let borrower = loan.agreement.borrower
-            lenders = Map.keys loan.agreement.participantsWithAmounts
-            lendersAndBorrowers = borrower::lenders
-            id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
-        debug $ show lendersAndBorrowers
-        if (sort sigAccumulator) == (sort lenders) then do
-          (batchCid, settleInstructions) <- settleTransactions loan.agreement lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
-          updatedContract <- create this with sigAccumulator = borrower::sigAccumulator
-          return $ Right (updatedContract, batchCid, settleInstructions)
-        else do
-          updatedContract <- create this with sigAccumulator = borrower::sigAccumulator
-          return $ Left updatedContract
+        let allParties = loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+        assertMsg ("Missing signatures. Expected: " <> show allParties <> ", found: " <> show sigAccumulator) $
+          sort sigAccumulator == sort allParties
+        let id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
+        settleTransactions loan.agreement allParties id routeProviderCid settlementFactoryCid bond
 
-    choice Accept_Lender : Either (ContractId SettlementProposal) (ContractId SettlementProposal, ContractId Batch.I, [ContractId Instruction.I])
+    choice Add_Signature : ContractId SettlementProposal
       with
-        currLender : Party
-      controller currLender
+        party : Party
+      controller party
       do
-        let borrower = loan.agreement.borrower
-            lenders = Map.keys loan.agreement.participantsWithAmounts
-        assertMsg "Must be an authorized lender" $ elem currLender lenders
-        let lendersAndBorrowers : [Party] = borrower :: lenders
-            id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
-        debug $ show lendersAndBorrowers
-        if sigAccumulator == borrower :: lenders then do
-          (batchCid, settleInstructions) <- settleTransactions loan.agreement lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
-          updatedContract <- create this with sigAccumulator = currLender::sigAccumulator
-          return $ Right (updatedContract, batchCid, settleInstructions)
-
-        -- add the current choice controller to the list of acquired signatures
-        else do
-          updatedContract <- create this with sigAccumulator = currLender::sigAccumulator
-          return $ Left updatedContract
+        let allParties = loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+        assertMsg ("Not an authorized party: " <> show party) $ elem party allParties
+        create this with sigAccumulator = party :: sigAccumulator
 
     choice Decline : ()
       -- ^ Decline the request.
