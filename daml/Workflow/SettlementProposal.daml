@@ -2,22 +2,18 @@ module Workflow.SettlementProposal where
 
 import DA.Functor
 import DA.List (sort)
-import qualified DA.Map as Map
+import DA.Map qualified as Map
+import DA.Set qualified as Set
+
+import Daml.Finance.Interface.Holding.Base qualified as Base
+import Daml.Finance.Interface.Settlement.Batch qualified as Batch
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement
+import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (I)
+import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
+import Daml.Finance.Interface.Settlement.Types (RoutedStep, Step(..))
 import Daml.Finance.Interface.Types.Common.Types
 
-import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
-import qualified DA.Set as S
-
-import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
-import qualified Daml.Finance.Interface.Settlement.Batch as Batch
-
-import Daml.Finance.Interface.Settlement.Batch qualified as Batch (I)
-import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (I)
-import Daml.Finance.Interface.Settlement.Types (RoutedStep, Step(..))
-import DA.Set (singleton)
-
 import Workflow.Origination
-import qualified Daml.Finance.Interface.Holding.Base as Base
 
 template SettlementProposal
   with
@@ -27,8 +23,8 @@ template SettlementProposal
     settlementFactoryCid : ContractId Settlement.F
     bond : InstrumentKey
   where
-    signatory loan.borrower::sigAccumulator
-    observer loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
+    signatory loan.borrower :: sigAccumulator
+    observer loan.borrower :: map fst (Map.toList loan.participantsWithAmounts)
 
     choice Accept_Borrower : Either (ContractId SettlementProposal) (ContractId SettlementProposal, ContractId Batch.I, [ContractId Instruction.I])
       controller loan.borrower
@@ -79,7 +75,7 @@ template SettlementProposal
       controller loan.borrower
       do
         exercise batchCid Batch.Settle with
-          actors = S.singleton loan.borrower
+          actors = Set.singleton loan.borrower
 
 settleTransactions :
   (HasField "agent" r1 Party
@@ -114,14 +110,14 @@ settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactor
 
   -- Discover settlement routes for the steps
   routedSteps <- exercise routeProviderCid RouteProvider.Discover with
-    discoverors = S.fromList $ lendersAndBorrowers
+    discoverors = Set.fromList $ lendersAndBorrowers
     contextId = None
     steps = stepsUsd ++ stepsBond
 
   -- Instruct settlement
   exercise settlementFactoryCid Settlement.Instruct with
-      instructors = S.fromList $ lendersAndBorrowers
-      settlers = singleton loan.borrower
+      instructors = Set.fromList $ lendersAndBorrowers
+      settlers = Set.singleton loan.borrower
       id = Id id
       description = "Settlement for " <> id
       contextId = None

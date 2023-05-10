@@ -208,8 +208,10 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
     actors = Set.fromList [lender]
     approval = TakeDelivery ledgerAccounts.garyAccount
 
-  batch <- queryContractId borrower_alice $ fromInterfaceContractId @B.Batch claimResult.batchCid
-  logSome ("No batch found for: " <> show claimResult.batchCid) batch
+  batch <- logLedger
+    borrower_alice
+    ("No batch found for: " <> show claimResult.batchCid)
+    (fromInterfaceContractId @B.Batch claimResult.batchCid)
 
   submitMulti [borrower_alice, agent_charlie] [] do
     exerciseCmd claimResult.batchCid Batch.Settle with

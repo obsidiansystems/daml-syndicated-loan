@@ -7,51 +7,35 @@ module Tests.Common where
 -}
 
 import DA.Action
-import DA.List as L
 import DA.Foldable
-import DA.List qualified as L
-import DA.Map (Map, empty)
-import qualified DA.Map as Map
-import qualified DA.Set as S
+import DA.List as L
+import DA.Map (Map)
+import DA.Map qualified as Map
+import DA.Set qualified as Set
 import Daml.Script
 
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Holding.Base qualified as B
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
-import Daml.Finance.Interface.Holding.Fungible (Fungible, Fungible, SplitResult(SplitResult))
-import Daml.Finance.Interface.Holding.Transferable (Transfer)
-import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
-import Daml.Finance.Interface.Lifecycle.Rule.Claim as ClaimI
+import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(..))
+import Daml.Finance.Interface.Holding.Fungible qualified as Fungible
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement
+import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction
+import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
+import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge))
 import Daml.Finance.Interface.Types.Common.Types
-import Daml.Finance.Lifecycle.Rule.Claim as Claim
 import Daml.Finance.Settlement.Factory (Factory(..))
-import qualified Daml.Finance.Holding.Fungible as FungibleX
-import qualified Daml.Finance.Holding.Fungible as FungibleX
-import qualified Daml.Finance.Interface.Holding.Base as B
-import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
-import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
-import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
-import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
-import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as SingleCustodian
+import Daml.Finance.Settlement.RouteProvider.SingleCustodian qualified as SingleCustodian
 
+import Util.Display
 import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
-import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
-import Daml.Finance.Interface.Holding.Fungible (I, Fungible, Fungible, SplitResult(SplitResult))
-import qualified Daml.Finance.Interface.Holding.Base as B
 import Workflow.SettlementProposal
 import Workflow.Transfer qualified as Transfer
 import Workflow.Util
-import qualified Daml.Finance.Interface.Settlement.Instruction as Instruction
-import qualified Daml.Finance.Interface.Settlement.Instruction as Settlement.I
-import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge))
-import qualified Daml.Finance.Interface.Settlement.Batch as Batch
-import DA.List.Total (head)
-import DA.Optional (fromSome, isSome)
-import DA.TextMap (fromList)
-
 
 -- Helper Template for test batching
 template Helper with
@@ -112,12 +96,12 @@ perfTest LedgerParties{..} = do
           version = instrumentVersion
 
     accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed_ingrid do
-      createCmd Account.Factory with provider = fed_ingrid; observers = empty
+      createCmd Account.Factory with provider = fed_ingrid; observers = Map.empty
 
     holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
       createCmd Fungible.Factory with
         provider = fed_ingrid
-        observers = Map.fromList [("Alice", S.fromList [borrower_alice])]
+        observers = Map.fromList [("Alice", Set.fromList [borrower_alice])]
 
     let config = Config with
           instrument = usdInstrument
@@ -199,7 +183,6 @@ setupBorrower LedgerParties{..} Config{..} amount = do
             version = instrument.version
           amount = 100000.0
     xv <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
-
     submit borrower_alice do
       exerciseCmd (coerceInterfaceContractId @Fungible xv) Fungible.Split with
         amounts = replicate amount 5.0
@@ -259,13 +242,13 @@ preOrigination LedgerParties{..} = do
       createCmd Account.Factory
         with
           provider = fed_ingrid
-          observers = Map.fromList $ (::[]) $ ("observers",) $ S.fromList $
+          observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
             [borrower_alice, borrower_bob]
 
     holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
       createCmd Fungible.Factory with
         provider = fed_ingrid
-        observers = Map.fromList $ (::[]) $ ("observers",) $ S.fromList $
+        observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
             [borrower_alice, borrower_bob]
 
     -- ...for Hortenses's Bank
@@ -338,7 +321,6 @@ preOrigination LedgerParties{..} = do
 
     aliceCashHoldingCid <- submit fed_ingrid do exerciseCmd aliceRequestCid CreditAccount.Accept
 
-
     -- ...for Charlie's agency
     charlieRequestCid <- submit agent_charlie do
       createCmd CreateAccount.Request with owner = agent_charlie; custodian = fed_ingrid
@@ -393,6 +375,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
           maxInterestRate = rate
           prospectus = "To test the syndicated loans framework :)"
           durationYears = 10
+  log loanApplication
   -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplication
   -- Agent coordinating the lending first asks an underwriter for a report
@@ -539,7 +522,7 @@ selectFundingInterests : LoanApplication -> [(ContractId FundingInterest, Fundin
 selectFundingInterests _ [] = error "No interests to fund loan"
 selectFundingInterests application interests =
   let sortedInterests = flip L.sortBy interests $ \(_, fi_a) (_, fi_b) -> compare fi_a.rate fi_b.rate
-      (bestRate, book, leftover) = buildBook application (RatePerAnnum 0.0) 0.0 empty interests
+      (bestRate, book, leftover) = buildBook application (RatePerAnnum 0.0) 0.0 Map.empty interests
    in FundingSelection with
         fundingSelection_ratePerAnnum = bestRate
         fundingSelection_selected = book
@@ -606,14 +589,14 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
       createCmd SingleCustodian.SingleCustodian with
         provider = fed_ingrid
-        observers = S.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
+        observers = Set.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
         custodian = fed_ingrid
 
   -- Create Settlement Factory
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit fed_ingrid do
     createCmd Factory with
       provider = fed_ingrid
-      observers = S.fromList [borrower_bob, borrower_alice]
+      observers = Set.fromList [borrower_bob, borrower_alice]
 
   -- Generate Settlement Proposal
   settlementProposalCid <- submit borrower_alice do
@@ -657,7 +640,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   -- Prepare to construct Allocate instructions
   -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids
   instructionViews <- forA instructionCids $ \icid -> do
-    iv <- submit borrower_alice $ exerciseCmd icid Settlement.I.GetView with viewer = borrower_alice
+    iv <- submit borrower_alice $ exerciseCmd icid Instruction.GetView with viewer = borrower_alice
     pure (icid, iv)
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
@@ -686,7 +669,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
           None -> fail $ "Could not find Holding for " <> show key'
           Some None -> fail $ "Insufficient funds for " <> show key'
           Some (Some receiverHoldingCid) -> do
-            SplitResult{splitCids, rest} <- submit key' do
+            Fungible.SplitResult{splitCids, rest} <- submit key' do
               exerciseCmd (coerceInterfaceContractId @Fungible receiverHoldingCid) Fungible.Split with
                 amounts = [routedStep.quantity.amount]
             debug $ "splitCids: " <> show splitCids
@@ -697,7 +680,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
             allocInstructions <- submit key' do
               exerciseCmd icid Instruction.Allocate with
-                actors = S.singleton key'
+                actors = Set.singleton key'
                 allocation = Pledge (coerceInterfaceContractId @B.Base splitCid)
 
             return ((routedStep.receiver, allocInstructions) :: accum, newMap)
@@ -718,7 +701,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   approvedSettleInstuctionCids <- forA allocatedSettleInstructions $ \(approvingParty, (allocInstructionsCid, _)) -> submit approvingParty do
     let Some approvingPartyAccount = Map.lookup approvingParty partyAccountMap
     exerciseCmd allocInstructionsCid Instruction.Approve with
-      actors = S.singleton approvingParty
+      actors = Set.singleton approvingParty
       approval = TakeDelivery approvingPartyAccount
 
   -- WARN: This can only be used in scripts, not on DAML Hub
@@ -739,5 +722,5 @@ createRouteProvider LedgerParties {..} = do
   toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
       createCmd SingleCustodian.SingleCustodian with
         provider = fed_ingrid
-        observers = S.fromList [borrower_alice, borrower_bob]
+        observers = Set.fromList [borrower_alice, borrower_bob]
         custodian = fed_ingrid
