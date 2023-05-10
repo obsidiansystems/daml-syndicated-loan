@@ -1,5 +1,5 @@
 -- | Helpers for writing daml scripts
-module Scripts.Util where
+module Util.Script where
 
 import DA.Functor
 import DA.Stack (HasCallStack)

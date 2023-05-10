@@ -27,10 +27,10 @@ import Daml.Finance.Settlement.Factory (observers, provider, Factory(Factory))
 import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
 import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 
-import Scripts.Util
 import Tests.Common
 import Tests.IDE
 import Util.Display
+import Util.Script
 import Workflow.Servicing (clockUpdateEvent)
 
 -- | Helper container used to transfer state from one script to another.
