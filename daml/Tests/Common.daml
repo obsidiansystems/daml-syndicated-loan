@@ -114,34 +114,9 @@ preOrigination LedgerParties{..} = do
         observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
             [borrower_alice, borrower_bob]
 
-    let mkAccount party amount = do
-          accountRequestCid <- submit party do
-            createCmd CreateAccount.Request with owner = party; custodian = fed
-
-          account <- submit fed do
-            exerciseCmd accountRequestCid CreateAccount.Accept with
-              label = show party
-              description = show party <> "'s account at the fed"
-              accountFactoryCid = accountFactoryCid
-              holdingFactoryCid
-              observers = []
-
-          holdingCid <- if (amount > 0.0) 
-              then do
-                allocationRequestCid <- submit party do
-                  createCmd CreditAccount.Request with
-                    account
-                    instrument = usdInstrument
-                    amount
-
-                holdingCid <- submit fed do exerciseCmd allocationRequestCid CreditAccount.Accept
-                pure $ Some holdingCid
-              else pure Nothing
-          return (account, holdingCid)
-
-
+    let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
     -- ...for Hortenses's Bank
-    (hortenseAccount, Some hortenseCashHoldingCid) <- mkAccount lender_hortense 100_000_000.00
+    (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense 100_000_000.00
 
     -- Hortense's bond account (request)
     hortenseBondAccountRequestCid <- submit lender_hortense do
@@ -158,7 +133,7 @@ preOrigination LedgerParties{..} = do
           observers = [borrower_alice]
 
     -- ...for Gary's Bank
-    (garyAccount, Some garyCashHoldingCid) <- mkAccount lender_gary 70_000_000.00
+    (garyAccount, Some garyCashHoldingCid) <- mkCashAccount lender_gary 70_000_000.00
 
     -- Gary's bond account (request)
     garyBondAccountRequestCid <- submit lender_gary do
@@ -175,10 +150,10 @@ preOrigination LedgerParties{..} = do
           observers = [borrower_alice]
 
     -- ...for Bob's Company
-    (bobAccount, None) <- mkAccount borrower_bob 0.0
+    (bobAccount, None) <- mkCashAccount borrower_bob 0.0
 
     -- ...for Alice's Company
-    (aliceAccount, Some aliceCashHoldingCid) <- mkAccount borrower_alice 250_684.9315
+    (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice 250_684.9315
 
     -- Alices's bond account (request)
     aliceBondAccountRequestCid <- submit borrower_alice do
@@ -195,10 +170,10 @@ preOrigination LedgerParties{..} = do
           observers = []
 
     -- ...for Charlie's agency
-    (charlieAccount, None) <- mkAccount agent_charlie 0.0
+    (charlieAccount, None) <- mkCashAccount agent_charlie 0.0
 
     -- ...for Debbie's agency
-    (debbieAccount, None) <- mkAccount agent_debbie 0.0
+    (debbieAccount, None) <- mkCashAccount agent_debbie 0.0
 
     let ledgerAccounts = LedgerAccounts with ..
     return $ PreOriginationStuff with

@@ -1,7 +1,14 @@
 -- | Accounts used in testing
 module Scripts.Accounts where
 
-import Daml.Finance.Interface.Types.Common.Types (AccountKey)
+import Daml.Script
+
+import Daml.Finance.Interface.Types.Common.Types (AccountKey, InstrumentKey)
+import Daml.Finance.Interface.Holding.Factory qualified as Holding
+import Daml.Finance.Interface.Holding.Base qualified as Holding
+import Daml.Finance.Interface.Account.Factory qualified as Account
+import Workflow.CreateAccount qualified as CreateAccount
+import Workflow.CreditAccount qualified as CreditAccount
 
 -- | Only a subset of the parties involved need to have accounts
 -- to exercise the lifecycle of the loan.
@@ -18,4 +25,38 @@ data LedgerAccounts = LedgerAccounts with
     hortenseAccount : AccountKey
     hortenseBondAccount : AccountKey
   deriving (Show, Eq, Ord)
+
+-- | Make and optionally fund an account
+makeAndFundAccount
+  : Party
+  -> InstrumentKey
+  -> ContractId Account.F
+  -> ContractId Holding.F
+  -> Party
+  -> Numeric 10
+  -> Script (AccountKey, Optional (ContractId Holding.I))
+makeAndFundAccount custodian instrument accountFactoryCid holdingFactoryCid party amount = do
+   accountRequestCid <- submit party do
+     createCmd CreateAccount.Request with custodian; owner = party
+
+   account <- submit custodian do
+     exerciseCmd accountRequestCid CreateAccount.Accept with
+       label = show party
+       description = show party <> "'s account at the fed"
+       accountFactoryCid = accountFactoryCid
+       holdingFactoryCid
+       observers = []
+
+   holdingCid <- if (amount > 0.0)
+       then do
+         allocationRequestCid <- submit party do
+           createCmd CreditAccount.Request with
+             account
+             instrument
+             amount
+
+         holdingCid <- submit custodian do exerciseCmd allocationRequestCid CreditAccount.Accept
+         pure $ Some holdingCid
+       else pure None
+   return (account, holdingCid)
 
