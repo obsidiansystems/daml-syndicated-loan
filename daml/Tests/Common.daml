@@ -2,11 +2,13 @@ module Tests.Common
   ( LedgerParties(..)
   , PreOriginationStuff(..)
   , OriginationSettlement(..)
+  , FundingSelection(..)
   , initialTest
   , preOrigination
   , Origination(..)
   , origination
   , settleLoan
+  , selectFundingInterests
   , Config(..)
   ) where
 
@@ -17,6 +19,7 @@ module Tests.Common
 -}
 
 import DA.Action
+import DA.Date (date, toGregorian, toDateUTC)
 import DA.Foldable
 import DA.Functor
 import DA.List qualified as L
@@ -32,29 +35,31 @@ import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible
 import Daml.Finance.Instrument.Bond.FixedRate.Factory qualified as FixedRate (Factory (..))
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
-import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate (F)
 import Daml.Finance.Interface.Holding.Base qualified as HoldingBase
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
 import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(..))
 import Daml.Finance.Interface.Holding.Fungible qualified as Fungible (Split(..))
+import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate (F)
 import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction
 import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
 import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge))
 import Daml.Finance.Interface.Types.Common.Types
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
+import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
 import Daml.Finance.Settlement.Factory qualified as Settlement (Factory(..))
 import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
-import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 import Daml.Finance.Settlement.Instruction qualified as Settlement
+import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 
 import Util.Display
-import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 import Workflow.SettlementProposal
 
-import Scripts.Parties
 import Scripts.Accounts
+import Scripts.Common
+import Scripts.Parties
 
 data Config = Config with
   instrument : InstrumentKey
@@ -85,6 +90,7 @@ data PreOriginationStuff = PreOriginationStuff with
   hortenseCashHoldingCid : ContractId HoldingBase.I
   garyCashHoldingCid : ContractId HoldingBase.I
   aliceCashHoldingCid : ContractId HoldingBase.I
+  charlieCashHoldingCid : ContractId HoldingBase.I
 
 -- Pre-origination set-up script that creates:
 -- - the asset in which the loans will be denominated
@@ -92,19 +98,11 @@ data PreOriginationStuff = PreOriginationStuff with
 -- - the accounts for the agents, lenders, and borrowers
 -- - initial assets for the lenders
 preOrigination : LedgerParties -> Script PreOriginationStuff
-preOrigination LedgerParties{..} = do
-    -- Create the Fed
+preOrigination parties@(LedgerParties{..}) = do
+    -- USD instrument definition
+    let usdInstrument = mkUsd fed 
 
-    -- Create USD
-    let instrumentId = Id "USD"
-        instrumentVersion = "0"
-        usdInstrument = InstrumentKey with
-          issuer = fed
-          depository = fed
-          id = instrumentId
-          version = instrumentVersion
-
-    -- Create USD Accounts for Banks and Companies
+    -- Create Factories
     accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed do
       createCmd Account.Factory
         with
@@ -135,147 +133,43 @@ preOrigination LedgerParties{..} = do
         paths = Map.fromList
           [ ("LoanInstrument", Hierarchy with
               rootCustodian = borrower_alice
-              pathsToRootCustodian = fmap (::[]) (toList allParties)
+              pathsToRootCustodian = fmap (::[]) $ toList $ allParties parties
             )
           , ("USD", Hierarchy with
               rootCustodian = fed
-              pathsToRootCustodian = fmap (::[]) (toList allParties)
+              pathsToRootCustodian = fmap (::[]) $ toList $ allParties parties
             )
           ]
 
-    -- ...for Hortenses's Bank
-    hortenseRequestCid <- submit lender_hortense do
-      createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed
+    let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
+    let makeLoanAccount = makeAccount "Loan" accountFactoryCid holdingFactoryCid
 
-    hortenseAccount <- submit fed do
-      exerciseCmd hortenseRequestCid CreateAccount.Accept with
-        label = "Hortense@Bank"
-        description = "Account of Hortense at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid
-        observers = []
+    log "-- Creating accounts --"
+    -- Hortense's USD account
+    (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense 100_000_000.00
+    -- Hortense's loan account
+    hortenseLoanAccount <- makeLoanAccount lender_hortense borrower_alice
 
-    -- allocate funds to Hortense
-    hortenseRequestCid <- submit lender_hortense do
-      createCmd CreditAccount.Request with
-        account = hortenseAccount
-        instrument = usdInstrument
-        amount = 100_000_000.00
+    -- Gary's USD account
+    (garyAccount, Some garyCashHoldingCid) <- mkCashAccount lender_gary 70_000_000.00
+    -- Gary's loan account
+    garyLoanAccount <- makeLoanAccount lender_gary borrower_alice
 
-    hortenseCashHoldingCid <- submit fed do exerciseCmd hortenseRequestCid CreditAccount.Accept
+    -- Bob's USD account
+    (bobAccount, None) <- mkCashAccount borrower_bob 0.0
 
-    -- Hortense's bond account (request)
-    hortenseBondAccountRequestCid <- submit lender_hortense do
-      createCmd CreateAccount.Request with
-        custodian = borrower_alice
-        owner = lender_hortense
-    -- Hortense's bond account (accept)
-    hortenseBondAccount <- submit borrower_alice do
-      exerciseCmd hortenseBondAccountRequestCid CreateAccount.Accept with
-          label = "HortenseBond@Bank"
-          description = "Account for Hortense's holding of Alice's Bond at Bank"
-          accountFactoryCid = accountFactoryCid
-          holdingFactoryCid = holdingFactoryCid
-          observers = [borrower_alice]
+    -- Alice's USD account
+    (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice 250_684.9315
+    -- Alices's loan account
+    aliceLoanAccount <- makeLoanAccount borrower_alice borrower_alice
 
-    -- ...for Gary's Bank
-    garyRequestCid <- submit lender_gary do
-      createCmd CreateAccount.Request with owner = lender_gary; custodian = fed
-    garyAccount <- submit fed do
-      exerciseCmd garyRequestCid CreateAccount.Accept with
-        label = "Gary@Bank"
-        description = "Account of Bob at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
+    -- Charlie's USD agency
+    (charlieAccount, Some charlieCashHoldingCid) <- mkCashAccount agent_charlie 6_000_000_000.00
+    -- Charlies's loan account
+    charlieLoanAccount <- makeLoanAccount agent_charlie borrower_alice
 
-    -- allocate funds to Gary
-    garyRequestCid <- submit lender_gary do
-      createCmd CreditAccount.Request with
-        account = garyAccount
-        instrument = usdInstrument
-        amount = 70_000_000.00
-
-    -- Gary's bond account (request)
-    garyBondAccountRequestCid <- submit lender_gary do
-      createCmd CreateAccount.Request with
-        custodian = borrower_alice
-        owner = lender_gary
-    -- Gary's bond account (accept)
-    garyBondAccount <- submit borrower_alice do
-      exerciseCmd garyBondAccountRequestCid CreateAccount.Accept with
-          label = "GaryBond@Bank"
-          description = "Account for Gary's holding of Alice's Bond at Bank"
-          accountFactoryCid = accountFactoryCid
-          holdingFactoryCid = holdingFactoryCid
-          observers = [borrower_alice]
-
-    garyCashHoldingCid <- submit fed do exerciseCmd garyRequestCid CreditAccount.Accept
-
-    -- ...for Bob's Company
-    bobRequestCid <- submit borrower_bob do
-      createCmd CreateAccount.Request with owner = borrower_bob; custodian = fed
-    bobAccount <- submit fed do
-      exerciseCmd bobRequestCid CreateAccount.Accept with
-        label = "Bob@Fed"
-        description = "Account of Bob at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
-
-    -- ...for Alice's Company
-    aliceRequestCid <- submit borrower_alice do
-      createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed
-    aliceAccount <- submit fed do
-      exerciseCmd aliceRequestCid CreateAccount.Accept with
-        label = "Alice@Bank"
-        description = "Account of Alice at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
-    aliceRequestCid <- submit borrower_alice do
-      createCmd CreditAccount.Request with
-        account = aliceAccount
-        instrument = usdInstrument
-        amount = 250_684.9315
-
-    aliceCashHoldingCid <- submit fed do exerciseCmd aliceRequestCid CreditAccount.Accept
-
-    -- Alices's bond account (request)
-    aliceBondAccountRequestCid <- submit borrower_alice do
-      createCmd CreateAccount.Request with
-        custodian = borrower_alice
-        owner = borrower_alice
-    -- Alices's bond account (accept)
-    aliceBondAccount <- submit borrower_alice do
-      exerciseCmd aliceBondAccountRequestCid CreateAccount.Accept with
-          label = "AliceBond@Bank"
-          description = "Account for Alice's holding of Alice's Bond at Bank" -- Necessary because the custodian of USD and bond accounts differ
-          accountFactoryCid = accountFactoryCid
-          holdingFactoryCid = holdingFactoryCid
-          observers = []
-
-    -- ...for Charlie's agency
-    charlieRequestCid <- submit agent_charlie do
-      createCmd CreateAccount.Request with owner = agent_charlie; custodian = fed
-    charlieAccount <- submit fed do
-      exerciseCmd charlieRequestCid CreateAccount.Accept with
-        label = "Charlie@Bank"
-        description = "Account of Charlie at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
-
-    -- ...for Debbie's agency
-    debbieRequestCid <- submit agent_debbie do
-      createCmd CreateAccount.Request with owner = agent_debbie; custodian = fed
-    debbieAccount <- submit fed do
-      exerciseCmd debbieRequestCid CreateAccount.Accept with
-        label = "Debbie@Bank"
-        description = "Account of Debbie at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
+    -- Debbie's USD account
+    (debbieAccount, None) <- mkCashAccount agent_debbie 0.0
 
     let ledgerAccounts = LedgerAccounts with ..
     return $ PreOriginationStuff with
@@ -289,19 +183,52 @@ preOrigination LedgerParties{..} = do
       hortenseCashHoldingCid
       garyCashHoldingCid
       aliceCashHoldingCid
+      charlieCashHoldingCid
 
 data Origination = Origination with
   loanAgreement : OriginatedLoanAgreement
   loanAgreementCid : ContractId OriginatedLoanAgreement
-  -- aliceBondAccountKey : AccountKey
-  -- garyBondAccountKey : AccountKey
-  -- garyBondHoldingKey : ContractId B.I
+  originationTime : Time
+
+createLoanApplication : LoanApplicationSubmission -> Script (ContractId LoanApplicationSubmission)
+createLoanApplication loanApplicationSubmission = do
+  log "-- Loan application sent to Agent --"
+  -- Borrower submits an application for a loan
+  application <- submit loanApplicationSubmission.borrower $
+    createCmd loanApplicationSubmission
+  log loanApplicationSubmission
+  pure application
+
+acceptLoanApplication
+  : Party
+  -> ContractId LoanApplicationSubmission
+  -> Text
+  -> Script (ContractId AcceptedLoanApplication)
+acceptLoanApplication agent application uuid = do
+  log "-- Agent accepts application --"
+  result <- submit agent $ exerciseCmd application LoanApplicationSubmission_Accept
+    with
+      uuid
+  logLedger agent ("Application not found: " <> show result) result
+  return result
+
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
+  now <- getTime
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
       uuid = "LoanInstrument"
+      startDate = toDateUTC now
+      (y,m,d) = toGregorian startDate
+
+      schedule = createPaymentPeriodicSchedule
+        (date (y+1) m d)
+        []
+        Following
+        Y 1
+        startDate
+        (date (y+10) m d)
       loanApplicationSubmission = LoanApplicationSubmission with
         borrower = borrower_alice
         agent = agent_charlie
@@ -309,15 +236,13 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
           instrument = usdInstrument
           amount
           maxInterestRate = rate
-          prospectus = "To test the syndicated loans framework :)"
+          prospectus = "Loan for acquisition of competitor"
           durationYears = 10
-  log loanApplicationSubmission
+          schedule
   -- Borrower submits an application for a loan
-  application <- submit borrower_alice $ createCmd loanApplicationSubmission
+  application <- createLoanApplication loanApplicationSubmission
   -- Agent accepts it
-  acceptedApplication <- submit agent_charlie $ exerciseCmd application LoanApplicationSubmission_Accept
-    with
-      uuid
+  acceptedApplication <- acceptLoanApplication agent_charlie application uuid
   -- Agent kicks off the loan application process
   applicationProcess <- submit agent_charlie $ exerciseCmd acceptedApplication AcceptedLoanApplication_StartProcess
   -- Agent coordinating the lending first asks an underwriter for a report
@@ -357,23 +282,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     (Map.keys fundingSelection_selected)
   -- Agent declines leftover funding interests
   forA_ fundingSelection_declined $ \declinedCid -> submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
-
-
-  -- Agent creates a route provider explaining how payments should flow between involved parties
-  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
-      createCmd IntermediatedStatic with
-        provider = agent_charlie
-        observers = Set.fromList [borrower_alice, lender_gary]
-        paths = Map.fromList
-          [ ("LoanInstrument", Hierarchy with
-              rootCustodian = borrower_alice
-              pathsToRootCustodian = [[lender_gary]]
-            )
-          , ("USD", Hierarchy with
-              rootCustodian = fed
-              pathsToRootCustodian = [[borrower_alice], [lender_gary]]
-            )
-          ]
+  
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
@@ -388,6 +297,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   pure Origination with
     loanAgreement
     loanAgreementCid
+    originationTime = now
 
 type Amount = Decimal
 
@@ -473,10 +383,11 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
   let agreement = LoanAgreement with
         agent
         participantsWithAmounts
-        borrower = acceptance.borrower
+        borrower = acceptance.mandateLetter.borrower
         uuid = acceptance.uuid
-        prospectus = acceptance.mandateLetter.prospectus
+        prospectus = acceptance.mandateLetter.mandateLetter.prospectus
         loanTerms = acceptance.terms
+        
   submit agent $ createCmd PendingLoanAgreement with
     agreement
     signed = []
@@ -502,10 +413,8 @@ data OriginationSettlement = OriginationSettlement with
 
 settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script OriginationSettlement
 settleLoan LedgerParties {..} preOriginationStuff origination = do
-  -- TODO: Below two steps is copy/paste from runBondStep
-
   -- Generate Settlement Proposal
-  settlementProposalCid <- submit borrower_alice do
+  settlementProposalCid <- submit agent_charlie do
     createCmd SettlementProposal with
       loan = origination.loanAgreement
       sigAccumulator = []
@@ -517,7 +426,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   -- Create a bond holding request
   aliceBondRequestCid <- submit borrower_alice do
     createCmd CreditAccount.Request with
-      account = preOriginationStuff.ledgerAccounts.aliceBondAccount
+      account = preOriginationStuff.ledgerAccounts.aliceLoanAccount
       instrument = origination.loanAgreement.bondKey
       amount = origination.loanAgreement.agreement.loanTerms.amount
 
@@ -556,26 +465,25 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         [ ((lender_gary, bondCurrency), Some preOriginationStuff.garyCashHoldingCid)
         , ((lender_hortense, bondCurrency), Some preOriginationStuff.hortenseCashHoldingCid)
         , ((borrower_alice, bondKey), Some aliceBondHoldingKey)
+        , ((agent_charlie, bondCurrency), Some preOriginationStuff.charlieCashHoldingCid)
+        -- , ((agent_charlie, bondKey), Some preOriginationStuff.ledgerAccounts.charlieLoanAccount)
         ]
 
-  let f (accum, map') (icid, routedStep) = do
+      f (accum, map') (icid, routedStep) = do
         let key' = routedStep.sender
             optionalReceiverHoldingCid = Map.lookup (key', routedStep.quantity.unit) map'
-        debug $ "allocatedSettleInstructions: " <> show key'
         case optionalReceiverHoldingCid  of
           None -> fail $ "Could not find Holding for " <> show key'
           Some None -> fail $ "Insufficient funds for " <> show key'
           Some (Some receiverHoldingCid) -> do
             SplitResult{splitCids, rest} <- submit key' do
+              -- Check to make sure routedStep is a step dealing with USD Accounts or Bond Accounts
               exerciseCmd (coerceInterfaceContractId @Fungible receiverHoldingCid) Fungible.Split with
                 amounts = [routedStep.quantity.amount]
-            debug $ "splitCids: " <> show splitCids
-            debug $ "rest: " <> show rest
             assertMsg "we only split a single amount" $ Prelude.length splitCids == 1
             let Some splitCid = DA.List.Total.head splitCids
                 newMap = Map.insert (key', routedStep.quantity.unit) (coerceInterfaceContractId @HoldingBase.Base <$> rest) map'
 
-            debugRaw $ "allocatedSettleInstructions: sender: " <> show key' <> " " <> show splitCid
             allocInstructions <- submit key' do
               exerciseCmd icid Instruction.Allocate with
                 actors = Set.singleton key'
@@ -587,18 +495,19 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
   -- initiate Map Party AccountKey
   let partyAccountMap = Map.fromList
-        [ ((borrower_alice, bondKey), preOriginationStuff.ledgerAccounts.aliceBondAccount)
+        [ ((borrower_alice, bondKey), preOriginationStuff.ledgerAccounts.aliceLoanAccount)
         , ((borrower_alice, bondCurrency), preOriginationStuff.ledgerAccounts.aliceAccount)
 
         , ((borrower_bob, bondCurrency), preOriginationStuff.ledgerAccounts.bobAccount)
 
-        , ((lender_gary, bondKey), preOriginationStuff.ledgerAccounts.garyBondAccount)
+        , ((lender_gary, bondKey), preOriginationStuff.ledgerAccounts.garyLoanAccount)
         , ((lender_gary, bondCurrency), preOriginationStuff.ledgerAccounts.garyAccount)
 
-        , ((lender_hortense, bondKey), preOriginationStuff.ledgerAccounts.hortenseBondAccount)
+        , ((lender_hortense, bondKey), preOriginationStuff.ledgerAccounts.hortenseLoanAccount)
         , ((lender_hortense, bondCurrency), preOriginationStuff.ledgerAccounts.hortenseAccount)
 
         , ((agent_charlie, bondCurrency), preOriginationStuff.ledgerAccounts.charlieAccount)
+        , ((agent_charlie, bondKey), preOriginationStuff.ledgerAccounts.charlieLoanAccount)
 
         , ((agent_debbie, bondCurrency), preOriginationStuff.ledgerAccounts.debbieAccount)
         ]
@@ -616,7 +525,8 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         approval = TakeDelivery approvingPartyAccount
 
   -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
-  settlementBases <- submit borrower_alice do
+  -- TODO: Do this without submitMulti
+  settlementBases <- submitMulti [agent_charlie, borrower_alice] [] do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
   -- Pick out each party's holdings from the list of returned contract id's
@@ -631,8 +541,6 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       settlementFungibleMap =
         createFungiblesMap
           (map L.head $ L.groupOn fst $ L.sortOn fst fungibles) -- We need to do deduplicate since a "query" by two different parties may return the same contract (if it's visible by multiple parties)
-
-  debugRaw $ "settlementFungibleMap: " <> show settlementFungibleMap
 
   borrowerAliceUsdHolding' : NonEmpty (ContractId Fungible.Fungible, Fungible.Fungible) <- lookupNonEmptyUsdHoldings borrower_alice settlementFungibleMap
   lenderGaryBondHolding' : (ContractId Fungible.Fungible, Fungible.Fungible) <- lookupSingleBondHolding lender_gary settlementFungibleMap

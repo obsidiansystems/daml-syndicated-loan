@@ -16,7 +16,7 @@ class Display a where
 
 -- | Logs a displayable datatype during execution of a daml script.
 log : Display a => a -> Script ()
-log = debugRaw . ("\n"<>). display -- We use debugRaw to ensure newlines cause line breaks
+log = debugRaw . ("\n"<>) . display -- We use debugRaw to ensure newlines cause line breaks
 
 -- | Log a displayable datatype with a fallback
 logSome : Display a => Text -> Optional a -> Script ()
@@ -34,8 +34,6 @@ showLedger
    => Party -> Text -> ContractId a -> Script ()
 showLedger party fallback cid = do
   logSome fallback . fmap show =<< queryContractId party cid
-
-
 
 instance Display Batch.Batch where
  display b = T.intercalate "\n" $ 
@@ -66,3 +64,11 @@ instance Display Decimal where
 
 instance Display InstrumentKey where
   display a = show a.id <> " v" <> (T.take 4 a.version)
+
+instance Display AccountKey where
+  display a =
+    show a.owner <> " account with " <> show a.custodian <> " custodian"
+
+displayLinesWith : Display a => (Text -> Text) -> a -> [Text]
+displayLinesWith f a =
+  (map f (T.lines $ display a))
