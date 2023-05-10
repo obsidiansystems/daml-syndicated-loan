@@ -1,0 +1,149 @@
+module Tests.PerfTests where
+
+import DA.Foldable
+import DA.List qualified as L
+import DA.Map qualified as Map
+import DA.Set qualified as Set
+import Daml.Script
+
+import Tests.Common
+
+import Daml.Finance.Account.Account qualified as Account (Factory(..))
+import Daml.Finance.Holding.Fungible qualified as Fungible
+import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Holding.Base qualified as HoldingBase
+import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(..))
+import Daml.Finance.Interface.Holding.Fungible qualified as Fungible (Split(..))
+import Daml.Finance.Interface.Types.Common.Types
+
+
+import Workflow.CreateAccount qualified as CreateAccount
+import Workflow.CreditAccount qualified as CreditAccount
+import Workflow.Transfer qualified as Transfer
+
+-- Helper Template for test batching
+template Helper with
+    p : Party
+    fed : Party
+  where
+    signatory p
+    observer fed, p
+    choice BatchTransferRequests : [ContractId Transfer.Request]
+      with cids : [ContractId Fungible]
+           receiverAccounts : [AccountKey]
+           instrument : InstrumentKey
+           currentOwner : Party
+           amount : Decimal
+      controller p
+      do
+        let thing = zip receiverAccounts cids
+        forA thing $ \(a, _b) -> do
+          create Transfer.Request with
+            receiverAccount = a
+            instrument
+            currentOwner
+            amount
+
+perfTest : LedgerParties -> Script ()
+perfTest LedgerParties{..} = do
+    let instrumentId = Id "USD"
+        instrumentVersion = "0"
+        usdInstrument = InstrumentKey with
+          issuer = fed
+          depository = fed
+          id = instrumentId
+          version = instrumentVersion
+
+    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed do
+      createCmd Account.Factory with provider = fed; observers = Map.empty
+
+    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed do
+      createCmd Fungible.Factory with
+        provider = fed
+        observers = Map.fromList [("Alice", Set.fromList [borrower_alice])]
+
+    let config = Config with
+          instrument = usdInstrument
+          accountFactoryCid
+          holdingFactoryCid
+    debug $ "Hortense"
+
+    accounts_hortense <- createAccounts LedgerParties{..} (accountFactoryCid, holdingFactoryCid) 3000
+    SplitResult{..} <- setupBorrower LedgerParties{..} config 1
+
+    acchelper_hortense <- submit lender_hortense $
+      createCmd Helper with
+        p = lender_hortense
+        fed = fed
+
+    debug $ "Batch Transfer Request"
+    batch_transfer_request <- submit lender_hortense $ do
+      exerciseCmd acchelper_hortense BatchTransferRequests with
+        cids = splitCids
+        receiverAccounts = accounts_hortense
+        instrument = usdInstrument
+        currentOwner = borrower_alice
+        amount = 5.0
+
+    let thing2 = zip batch_transfer_request splitCids
+        thing3 = L.chunksOf 100 thing2
+
+    debug $ "Length of [(ContractId Transfer.Request, ContractId Fungible)]: " <> show (L.length thing3)
+    debug $ "Splitting Accept Events.."
+    forA_ thing3 $ splitEvents LedgerParties{..}
+
+    debug $ show splitCids
+    debug $ show rest
+    pure ()
+
+
+-- Split up events into separate script batches to not crash the sequencer
+splitEvents : LedgerParties -> [(ContractId Transfer.Request, ContractId Fungible)] -> Script ([ContractId HoldingBase.I])
+splitEvents LedgerParties{..} ids = do
+  forA ids $ \(a, b) -> do
+    debug $ "Batch Event running.. "
+    submit borrower_alice $ exerciseCmd a Transfer.Accept with
+      holdingCid = (coerceInterfaceContractId @HoldingBase.Base b)
+
+
+-- Create an N number of accounts for lender_hortense
+createAccounts : LedgerParties -> (ContractId Account.F, ContractId Holding.F) -> Int -> Script [AccountKey]
+createAccounts LedgerParties{..} (accountFactoryCid, holdingFactoryCid) amount = do
+    forA [1..amount] $ \x -> do
+      account <- submit lender_hortense $ createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed
+      debug $ (show account)
+      submit fed $ do
+          exerciseCmd account CreateAccount.Accept with
+            label = (show x)
+            description = "null"
+            accountFactoryCid
+            holdingFactoryCid
+            observers = [borrower_alice]
+
+-- Setup borrower alice
+setupBorrower : LedgerParties -> Config -> Int -> Script (SplitResult)
+setupBorrower LedgerParties{..} Config{..} amount = do
+    aliceReq <- submit borrower_alice do
+      createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed
+    aliceAccount <- submit fed do
+      exerciseCmd aliceReq CreateAccount.Accept with
+        label = "Alice@Fed"
+        description = "null"
+        accountFactoryCid
+        holdingFactoryCid
+        observers = [borrower_alice]
+    requestMon <- submit borrower_alice do
+        createCmd CreditAccount.Request with
+          account = aliceAccount
+          instrument = InstrumentKey with
+            issuer = fed
+            depository = fed
+            id = instrument.id
+            version = instrument.version
+          amount = 100000.0
+    xv <- submit fed do exerciseCmd requestMon CreditAccount.Accept
+    submit borrower_alice do
+      exerciseCmd (coerceInterfaceContractId @Fungible xv) Fungible.Split with
+        amounts = replicate amount 5.0
+

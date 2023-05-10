@@ -1,0 +1,67 @@
+-- | Helper script to set up parties on the ledger for testing
+module Scripts.Parties where
+
+import DA.Set (Set)
+import DA.Set qualified as Set
+import DA.Text qualified as T
+import Daml.Script
+import Util.Display
+
+-- | Parties representing various agents in the syndicated loan workflow
+-- Each type of agent has two representatives so that we can test disclosure
+-- and divulgence.
+data LedgerParties = LedgerParties with
+    borrower_alice : Party
+    borrower_bob : Party
+    agent_charlie : Party
+    agent_debbie : Party
+    underwriter_emma : Party
+    underwriter_fred : Party
+    lender_gary : Party
+    lender_hortense : Party
+    fed : Party
+    allParties : Set Party
+  deriving (Show, Eq, Ord)
+
+instance Display LedgerParties where
+  display p = T.intercalate "\n" $ map display
+    [ p.borrower_alice
+    , p.borrower_bob
+    , p.agent_charlie
+    , p.agent_debbie
+    , p.underwriter_emma
+    , p.underwriter_fred
+    , p.lender_gary
+    , p.lender_hortense
+    , p.fed
+    ]
+
+instance Display Party where
+  display = show
+
+createParties : Script LedgerParties
+createParties = do
+  log "-- Creating Parties --"
+  borrower_alice <- allocateParty "Borrower_Alice"
+  borrower_bob <- allocateParty "Borrower_Bob"
+  agent_charlie <- allocateParty "Agent_Charlie"
+  agent_debbie <- allocateParty "Agent_Debbie"
+  underwriter_emma <- allocateParty "Underwriter_Emma"
+  underwriter_fred <- allocateParty "Underwriter_Fred"
+  lender_gary <- allocateParty "Lender_Gary"
+  lender_hortense <- allocateParty "Lender_Hortense"
+  fed <- allocateParty "Fed"
+  let allParties = Set.fromList
+        [ borrower_alice
+        , borrower_bob
+        , agent_charlie
+        , agent_debbie
+        , underwriter_emma
+        , underwriter_fred
+        , lender_gary
+        , lender_hortense
+        , fed
+        ]
+  let ledgerParties = LedgerParties { .. }
+  log ledgerParties
+  pure ledgerParties
