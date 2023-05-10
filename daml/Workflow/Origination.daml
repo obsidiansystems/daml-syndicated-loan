@@ -1,5 +1,33 @@
-module Workflow.Origination where
+module Workflow.Origination
+  ( AcceptedLoan(..)
+  , AcceptedLoan_SignAgreement(..)
+  , AcceptedMandateLetter(..)
+  , AcceptedMandateLetter_CreateOffer(..)
+  , CreateUnderwritingResult(..)
+  , FundingInterest(..)
+  , FundingInterest_Decline(..)
+  , FundingInterest_SignAgreement(..)
+  , FundingRequest(..)
+  , FundingRequest_Respond(..)
+  , LoanAgreement(..)
+  , LoanApplication(..)
+  , LoanApplicationData(..)
+  , LoanApplication_CreateUnderwritingRequest(..)
+  , MakeFundingRequest(..)
+  , MandateLetterOffer_Accept(..)
+  , PendingLoanAgreement(..)
+  , PendingLoanAgreement_Finalize(..)
+  , RatePerAnnum(..)
+  , SyndicatedLoanOffer(..)
+  , SyndicatedLoanOffer_Accept(..)
+  , UnderwritingRequest(..)
+  , UnderwritingResult(..)
+  , UnderwritingResult_Disclose(..)
+  , UnderwritingResult_OfferMandateLetter(..)
+  )
+  where
 
+import Prelude hiding (agreement, key)
 import DA.Date (date, toGregorian, toDateUTC)
 import DA.Map (Map)
 import DA.Map qualified as Map
@@ -301,14 +329,14 @@ template UnderwritingDisclosure
 
     nonconsuming choice MakeFundingRequest : ContractId FundingRequest
       with
-        participant : Party
+        requestee : Party
       controller agent
       do
         create FundingRequest with
           agent = agent
           uuid = uuid
           totalApplicationAmount = report.amount
-          participant
+          participant = requestee
           underwrite = self
 
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
@@ -517,7 +545,7 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
   couponPeriodMultiplier issueDate maturityDate = do
     -- CREATE_PERIODIC_SCHEDULE_BEGIN
     let
-      (y, m, d) = toGregorian firstCouponDate
+      (_y, _m, d) = toGregorian firstCouponDate
       periodicSchedule = PeriodicSchedule with
         businessDayAdjustment =
           Cal.BusinessDayAdjustment with

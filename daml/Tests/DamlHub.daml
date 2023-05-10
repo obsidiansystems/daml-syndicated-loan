@@ -1,7 +1,8 @@
 module Tests.DamlHub where
 
-import Tests.Common
 import Daml.Script
+
+import Tests.Common
 
 initialTestHub : LedgerParties -> Script ()
 initialTestHub parties = initialTest parties
