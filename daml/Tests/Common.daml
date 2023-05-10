@@ -30,18 +30,19 @@ import Daml.Script
 
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible
-import Daml.Finance.Instrument.Bond.FixedRate.Factory qualified as FixedRate
+import Daml.Finance.Instrument.Bond.FixedRate.Factory qualified as FixedRate (Factory (..))
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate (F)
 import Daml.Finance.Interface.Holding.Base qualified as HoldingBase
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
 import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(..))
 import Daml.Finance.Interface.Holding.Fungible qualified as Fungible (Split(..))
-import Daml.Finance.Interface.Settlement.Factory qualified as Settlement
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction
 import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
 import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge))
 import Daml.Finance.Interface.Types.Common.Types
-import Daml.Finance.Settlement.Factory (Factory(..))
+import Daml.Finance.Settlement.Factory qualified as Settlement (Factory(..))
 import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
 import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 import Daml.Finance.Settlement.Instruction qualified as Settlement
@@ -76,6 +77,9 @@ initialTest parties = do
 data PreOriginationStuff = PreOriginationStuff with
   accountFactoryCid : ContractId Account.F
   holdingFactoryCid : ContractId Holding.F
+  fixedRateBondFactoryCid : ContractId FixedRate.F
+  settlementFactoryCid : ContractId Settlement.F
+  routeProviderCid : ContractId RouteProvider.I
   usdInstrument : InstrumentKey
   ledgerAccounts : LedgerAccounts
   hortenseCashHoldingCid : ContractId HoldingBase.I
@@ -113,6 +117,31 @@ preOrigination LedgerParties{..} = do
         provider = fed
         observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
             [borrower_alice, borrower_bob]
+
+    fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
+      provider = agent_charlie
+      observers = Map.empty
+
+    settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
+      createCmd Settlement.Factory with
+        provider = agent_charlie
+        observers = Set.fromList [borrower_alice, borrower_bob]
+
+    -- Create Route Provider
+    routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit borrower_alice do
+      createCmd IntermediatedStatic with
+        provider = borrower_alice
+        observers = Set.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
+        paths = Map.fromList
+          [ ("LoanInstrument", Hierarchy with
+              rootCustodian = borrower_alice
+              pathsToRootCustodian = fmap (::[]) (toList allParties)
+            )
+          , ("USD", Hierarchy with
+              rootCustodian = fed
+              pathsToRootCustodian = fmap (::[]) (toList allParties)
+            )
+          ]
 
     -- ...for Hortenses's Bank
     hortenseRequestCid <- submit lender_hortense do
@@ -252,6 +281,9 @@ preOrigination LedgerParties{..} = do
     return $ PreOriginationStuff with
       accountFactoryCid
       holdingFactoryCid
+      fixedRateBondFactoryCid
+      settlementFactoryCid
+      routeProviderCid
       usdInstrument
       ledgerAccounts
       hortenseCashHoldingCid
@@ -342,18 +374,9 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
               pathsToRootCustodian = [[borrower_alice], [lender_gary]]
             )
           ]
-
-  -- Agent creates a settlement factory
-  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
-    createCmd Factory with
-      provider = agent_charlie
-      observers = Set.fromList [borrower_alice,lender_gary]
   
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
-  fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
-    provider = agent_charlie
-    observers = Map.empty
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
     with
       now
@@ -482,35 +505,13 @@ settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script Origi
 settleLoan LedgerParties {..} preOriginationStuff origination = do
   -- TODO: Below two steps is copy/paste from runBondStep
 
-  -- 1. Create Route Provider
-  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit borrower_alice do
-      createCmd IntermediatedStatic with
-        provider = borrower_alice
-        observers = Set.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
-        paths = Map.fromList
-          [ ("LoanInstrument", Hierarchy with
-              rootCustodian = borrower_alice
-              pathsToRootCustodian = [[lender_gary], [lender_hortense]]
-            )
-          , ("USD", Hierarchy with
-              rootCustodian = fed
-              pathsToRootCustodian = [[borrower_alice], [lender_gary], [lender_hortense]]
-            )
-          ]
-
-  -- 2. Create Settlement Factory
-  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit borrower_alice do
-    createCmd Factory with
-      provider = borrower_alice
-      observers = Set.fromList [borrower_bob, borrower_alice]
-
   -- Generate Settlement Proposal
   settlementProposalCid <- submit borrower_alice do
     createCmd SettlementProposal with
       loan = origination.loanAgreement
       sigAccumulator = []
-      routeProviderCid
-      settlementFactoryCid
+      routeProviderCid = preOriginationStuff.routeProviderCid
+      settlementFactoryCid = preOriginationStuff.settlementFactoryCid
       bond = origination.loanAgreement.bondKey
 
   -- Create a bond holding request
