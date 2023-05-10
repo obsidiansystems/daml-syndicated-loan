@@ -520,16 +520,7 @@ acceptLoanProposal borrower offerCid = do
 
 servicing : LedgerParties -> Origination -> Script ()
 servicing LedgerParties{..} origination = do
-  {-
-  rule <- fmap (toInterfaceContractId @ClaimI.I) $
-    submit agent $ createCmd $ Claim.Rule with
-      providers = Set.fromList [agent, bob]
-      claimers = bob
-      settlers = bob
-      Claim.routeProviderCid = routeProviderCid
-      settlementFactoryCid
-      netInstructions
-  -}
+
   pure ()
 
 settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script ()
@@ -660,7 +651,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   --       actors = S.singleton agent_charlie
 
   -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
-  _ <- submit borrower_alice do
+  settlementBases <- submit borrower_alice do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
   return ()
