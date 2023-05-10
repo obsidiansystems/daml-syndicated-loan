@@ -398,10 +398,14 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Agent coordinating the lending first asks an underwriter for a report
   underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma uuid application)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
-  -- Agent with underwriter's report in hand reaches out to possible lenders
+  -- Agent goes back to the borrower with a mandate letter offer
+  mandateLetterOffer <- submit agent_charlie $ exerciseCmd underwritingResult UnderwritingResult_OfferMandateLetter
+  acceptedMandateLetter <- submit borrower_alice $ exerciseCmd mandateLetterOffer MandateLetterOffer_Accept
+
+  -- Agent with underwriter's report and accepted mandate letter in hand reaches out to possible lenders
   let possibleLenders = [lender_gary, lender_hortense]
   forA_ possibleLenders $ \lender -> do
-    makeFundingRequest agent_charlie amount underwritingResult lender
+    makeFundingRequest agent_charlie amount underwritingResult acceptedMandateLetter lender
   -- Lenders make their offers
   -- TODO: Lenders declining to make an offer
   fundingInterestCids <- forA possibleLenders $ \lender -> do
@@ -412,7 +416,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     pure (cid, fundingInterest)
   -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
   let FundingSelection{..} = selectFundingInterests loanApplication fundingInterests
-  loanProposal <- submit agent_charlie $ createLoanProposal application uuid fundingSelection_ratePerAnnum
+  loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter uuid fundingSelection_ratePerAnnum
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
@@ -499,12 +503,14 @@ makeFundingRequest
     : Party
     -> Decimal
     -> ContractId UnderwritingResult
+    -> ContractId AcceptedMandateLetter
     -> Party
     -> Script (ContractId FundingRequest)
-makeFundingRequest agent amount underwriteCid lender = do
+makeFundingRequest agent amount underwriteCid mandateLetterCid lender = do
     Some underwrite <- queryContractId agent underwriteCid
     disclosedUnderwriting <- submit agent $ exerciseCmd underwriteCid UnderwritingResult_Disclose with
         disclose_to = lender
+        mandateLetterCid
     submit agent $ exerciseCmd disclosedUnderwriting MakeFundingRequest with
         participant = lender
 
@@ -574,14 +580,14 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
         participantsWithAmounts
         borrower = acceptance.borrower
         uuid = acceptance.uuid
-        prospectus = acceptance.applicationData.prospectus
+        prospectus = acceptance.mandateLetter.prospectus
         loanTerms = acceptance.terms
   submit agent $ createCmd PendingLoanAgreement with
     agreement
     signed = []
 
-createLoanProposal : ContractId LoanApplication -> Text -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
-createLoanProposal applicationCid uuid rate = exerciseCmd applicationCid LoanApplication_CreateOffer with
+createLoanProposal : ContractId AcceptedMandateLetter -> Text -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
+createLoanProposal applicationCid uuid rate = exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
   uuid
   rate
 

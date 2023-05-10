@@ -67,27 +67,14 @@ template LoanApplication
           uuid
           loan = this
 
-    choice LoanApplication_CreateOffer : ContractId SyndicatedLoanOffer
-      with
-        rate : RatePerAnnum
-        uuid : Text
-      controller agent
-      do
-        create SyndicatedLoanOffer with
-          borrower
-          agent
-          uuid
-          applicationData
-          terms = LoanTerms with
-            instrument = applicationData.instrument
-            amount = applicationData.amount
-            rate
-            durationYears = applicationData.durationYears
-
 template UnderwritingRequest
   with
     underwriter : Party
-    uuid : Text -- Generated client-side by the agent so that each 'LoanApplication' has unique ID. We could also use a 'ContractId LoanApplication' to be the unique ID for a 'UnderwritingRequest', but the borrower has the ability to archive the LoanApplication, and we don't want to give the borrower the ability to delete a piece of data that is referred to by contracts involving other parties.
+    uuid : Text
+    -- Generated client-side by the agent so that each 'LoanApplication' has unique ID.
+    -- We could also use a 'ContractId LoanApplication' to be the unique ID for a 'UnderwritingRequest',
+    -- but the borrower has the ability to archive the LoanApplication, and we don't want to give the borrower
+    -- the ability to delete a piece of data that is referred to by contracts involving other parties.
     loan : LoanApplication -- See comment above
   where
     signatory loan.agent
@@ -103,7 +90,13 @@ template UnderwritingRequest
         create UnderwritingResult with
           underwriter
           agent = loan.agent
-          applicationData = loan.applicationData
+          borrower = loan.borrower
+          report = UnderwritingReport with
+            instrument = this.loan.applicationData.instrument
+            amount = this.loan.applicationData.amount
+            durationYears = this.loan.applicationData.durationYears
+            maxInterestRate = this.loan.applicationData.maxInterestRate
+            prospectus = this.loan.applicationData.prospectus
           uuid
           result
 
@@ -112,39 +105,124 @@ template UnderwritingResult
     underwriter : Party
     uuid : Text
     agent : Party
-    applicationData : LoanApplicationData
+    borrower : Party
+    report : UnderwritingReport
     result : Bool
   where
     signatory agent, underwriter
     key (underwriter, agent, uuid) : (Party, Party, Text)
     maintainer key._1
 
+    nonconsuming choice UnderwritingResult_OfferMandateLetter : ContractId MandateLetterOffer
+    -- TODO: Do not just take from terms
+      controller agent
+      do
+        create MandateLetterOffer with
+          underwriter
+          agent
+          borrower
+          mandateLetter = MandateLetter with
+            instrument = report.instrument
+            amount = report.amount
+            durationYears = report.durationYears
+            prospectus = report.prospectus
+      
     nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
       with
         disclose_to : Party
+        mandateLetterCid : ContractId AcceptedMandateLetter
       controller agent
       do
+        _ <- fetch mandateLetterCid
         create UnderwritingDisclosure with
-          underwriting = this
+          underwriter
+          agent
+          uuid
+          report = this.report
           participant = disclose_to
+
+data UnderwritingReport = UnderwritingReport with
+    instrument : InstrumentKey
+    amount : Decimal -- Principal. TODO: for now always equal to LoanApplication.amount
+    maxInterestRate : RatePerAnnum -- the maximum interest rate that the applicant is underwritten for
+    durationYears : Int
+    -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
+    prospectus : Text
+  deriving (Eq, Ord, Show)
+
+data MandateLetter = MandateLetter
+  with
+    instrument : InstrumentKey
+    amount : Decimal -- Principal. TODO: for now always equal to LoanApplication.amount
+    durationYears : Int
+    -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
+    prospectus : Text
+  deriving (Eq, Ord, Show)
+
+template MandateLetterOffer
+  with
+    agent : Party
+    underwriter : Party
+    borrower : Party
+    mandateLetter : MandateLetter
+  where
+    signatory agent, underwriter
+    observer borrower
+    choice MandateLetterOffer_Accept : ContractId AcceptedMandateLetter
+      controller borrower
+      do
+        create AcceptedMandateLetter with ..
+    choice MandateLetterOffer_Reject : ()
+      controller borrower
+      do
+        pure ()
+
+template AcceptedMandateLetter
+  with
+    agent : Party
+    underwriter : Party
+    borrower : Party
+    mandateLetter : MandateLetter
+  where
+    signatory agent, underwriter, borrower
+    choice AcceptedMandateLetter_CreateOffer : ContractId SyndicatedLoanOffer
+      with
+        rate : RatePerAnnum
+        uuid : Text
+      controller agent
+      do
+        create SyndicatedLoanOffer with
+          borrower
+          agent
+          uuid
+          mandateLetter
+          terms = LoanTerms with
+            instrument = mandateLetter.instrument
+            amount = mandateLetter.amount
+            rate
+            durationYears = mandateLetter.durationYears
+
 
 template UnderwritingDisclosure
   with
-    underwriting : UnderwritingResult
+    underwriter : Party
+    agent : Party
+    uuid : Text
+    report : UnderwritingReport
     participant : Party
   where
-    signatory underwriting.underwriter, underwriting.agent
+    signatory underwriter, agent
     observer participant
 
     nonconsuming choice MakeFundingRequest : ContractId FundingRequest
       with
         participant : Party
-      controller underwriting.agent
+      controller agent
       do
         create FundingRequest with
-          agent = underwriting.agent
-          uuid = underwriting.uuid
-          totalApplicationAmount = underwriting.applicationData.amount
+          agent = agent
+          uuid = uuid
+          totalApplicationAmount = report.amount
           participant
           underwrite = self
 
@@ -172,12 +250,12 @@ template FundingRequest
       do
         disclosed <- fetch underwrite
         assertMsg "Must respond with an interest rate less than the maximum underwritten" $
-          rate <= disclosed.underwriting.applicationData.maxInterestRate
+          rate <= disclosed.report.maxInterestRate
         create FundingInterest with
           agent
           uuid
           participant
-          instrument = disclosed.underwriting.applicationData.instrument
+          instrument = disclosed.report.instrument
           amount
           rate
 
@@ -222,7 +300,7 @@ template SyndicatedLoanOffer
     agent : Party
     uuid : Text
     borrower : Party
-    applicationData : LoanApplicationData
+    mandateLetter : MandateLetter
     terms : LoanTerms
     --NOTE: Maybe a covenant, once agreed by the borrower, could actually grant access to some on-chain data in the future, which is necessary to enforce it. and this could also trigger on-chain modifications of the loan.
   where
@@ -237,7 +315,7 @@ template SyndicatedLoanOffer
           agent
           borrower
           uuid
-          applicationData
+          mandateLetter
           terms
 
 data LoanTerms = LoanTerms with
@@ -245,7 +323,6 @@ data LoanTerms = LoanTerms with
     amount : Decimal -- Principal. TODO: for now always equal to LoanApplication.amount
     rate : RatePerAnnum
     -- ^ The interest amount paid by the borrower yearly is (amount * rate).
-    -- ^ TODO: for now this is always equal to LoanApplication.maxInterestRate, but we want this to become an amount-weighted average of offered participant rates
     durationYears : Int
     -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
       deriving (Eq, Show)
@@ -255,7 +332,7 @@ template AcceptedLoan
     agent : Party
     borrower : Party
     uuid : Text
-    applicationData : LoanApplicationData
+    mandateLetter : MandateLetter
     terms : LoanTerms
   where
     signatory borrower
