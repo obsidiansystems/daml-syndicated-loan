@@ -78,6 +78,7 @@ template SettlementProposal
         batchCid : ContractId Batch.I
       controller loan.agent
       do
+        -- TODO: Check to make sure all signatures are in place
         exercise batchCid Batch.Settle with
           actors = S.singleton loan.borrower
 
