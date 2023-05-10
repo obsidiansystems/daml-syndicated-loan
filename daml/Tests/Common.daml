@@ -59,7 +59,9 @@ import Workflow.SettlementProposal
 
 import Scripts.Accounts
 import Scripts.Common
+import Scripts.Factories
 import Scripts.Parties
+import Scripts.RouteProvider
 
 data Config = Config with
   instrument : InstrumentKey
@@ -103,46 +105,16 @@ preOrigination parties@(LedgerParties{..}) = do
     let usdInstrument = mkUsd fed 
 
     -- Create Factories
-    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed do
-      createCmd Account.Factory
-        with
-          provider = fed
-          observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
-            [borrower_alice, borrower_bob, agent_charlie]
-
-    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed do
-      createCmd Fungible.Factory with
-        provider = fed
-        observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
-            [borrower_alice, borrower_bob, agent_charlie]
-
-    fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
-      provider = agent_charlie
-      observers = Map.empty
-
-    settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
-      createCmd Settlement.Factory with
-        provider = agent_charlie
-        observers = Set.fromList [borrower_alice, borrower_bob]
+    accountFactoryCid <- accountFactory fed $ allParties parties
+    holdingFactoryCid <- holdingFactory fed $ allParties parties
+    fixedRateBondFactoryCid <- fixedRateFactory agent_charlie Map.empty
+    settlementFactoryCid <- settlementFactory agent_charlie $ allParties parties
 
     -- Create Route Provider
-    routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
-      createCmd IntermediatedStatic with
-        provider = agent_charlie
-        observers = Set.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
-        paths = Map.fromList
-          [ ("LoanInstrument", Hierarchy with
-              rootCustodian = borrower_alice
-              pathsToRootCustodian = fmap (::[]) $ toList $ allParties parties
-            )
-          , ("USD", Hierarchy with
-              rootCustodian = fed
-              pathsToRootCustodian = fmap (::[]) $ toList $ allParties parties
-            )
-          ]
-
-    -- ...for Hortenses's Bank
-    (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense 100_000_000.00
+    routeProviderCid <- createRouteProvider borrower_alice (allParties parties)
+      [ ("LoanInstrument", borrower_alice)
+      , ("USD", fed)
+      ]
 
     let makeBondAccount = makeAccount "Bond" accountFactoryCid holdingFactoryCid
     let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
@@ -161,9 +133,6 @@ preOrigination parties@(LedgerParties{..}) = do
 
     -- Gary's bond account
     garyBondAccount <- makeBondAccount lender_gary borrower_alice
-
-    -- ...for Bob's Company
-    (bobAccount, None) <- mkCashAccount borrower_bob 0.0
 
     -- ...for Alice's Company
     -- Bob's USD account
