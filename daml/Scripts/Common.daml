@@ -1,0 +1,14 @@
+module Scripts.Common where
+
+import Daml.Finance.Interface.Types.Common.Types
+
+mkUsd : Party -> InstrumentKey
+mkUsd fed = 
+  let instrumentId = Id "USD"
+      instrumentVersion = "0"
+      usdInstrument = InstrumentKey with
+          issuer = fed
+          depository = fed
+          id = instrumentId
+          version = instrumentVersion
+  in usdInstrument
