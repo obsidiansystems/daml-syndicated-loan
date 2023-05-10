@@ -15,7 +15,7 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
           maxInterestRate = RatePerAnnum 0.05 -- 5% per annum
           prospectus = "To validate the syndicated loans framework :)"
           durationYears = 10
-        
+
         aliceLoanApplication = LoanApplicationSubmission with
             borrower = borrower_alice
             agent = agent_charlie
@@ -28,12 +28,12 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
           maxInterestRate = RatePerAnnum 0.07 -- 7% per annum
           prospectus = "To break the syndicated loans framework >:)"
           durationYears = 7
-        
+
         bobLoanApplication1 = LoanApplicationSubmission with
             borrower = borrower_bob
             agent = agent_debbie
             applicationData = bobApplicationData
-        
+
         bobLoanApplication2 = LoanApplicationSubmission with
             borrower = borrower_bob
             agent = agent_debbie
