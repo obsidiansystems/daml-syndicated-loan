@@ -185,12 +185,17 @@ preOrigination LedgerParties{..} = do
 
     -- Create USD Accounts for Banks and Companies
     accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed_ingrid do
-      createCmd Account.Factory with provider = fed_ingrid; observers = empty
+      createCmd Account.Factory
+        with
+          provider = fed_ingrid
+          observers = Map.fromList $ (::[]) $ ("observers",) $ S.fromList $
+            [borrower_alice, borrower_bob]
 
     holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
       createCmd Fungible.Factory with
         provider = fed_ingrid
-        observers = empty -- fromList [("PublicObserver", singleton public )] -- TODO: Probably wont need this
+        observers = Map.fromList $ (::[]) $ ("observers",) $ S.fromList $
+            [borrower_alice, borrower_bob]
 
     -- ...for Hortenses's Bank
     hortenseRequestCid <- submit lender_hortense do

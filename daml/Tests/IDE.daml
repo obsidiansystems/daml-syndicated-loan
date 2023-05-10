@@ -1,6 +1,7 @@
 module Tests.IDE where
 
 import Tests.Common
+import Tests.Negative
 import Daml.Script
 
 createParties : Script LedgerParties
@@ -27,3 +28,9 @@ goldenTestIDE : Script ()
 goldenTestIDE = do
   parties <- createParties
   initialTest parties
+
+negativeTestIDE : Script ()
+negativeTestIDE = do
+  parties <- createParties
+  preorigination <- preOrigination parties
+  originationTests parties preorigination
