@@ -21,6 +21,7 @@ data LedgerAccounts = LedgerAccounts with
     aliceBondAccount : AccountKey
     bobAccount : AccountKey
     charlieAccount : AccountKey
+    charlieBondAccount : AccountKey
     debbieAccount : AccountKey
     garyAccount : AccountKey -- Cash account
     garyBondAccount : AccountKey

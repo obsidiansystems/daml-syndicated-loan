@@ -22,7 +22,6 @@ clockUpdateEvent providers observers today = do
     description = show today
     id = Id description
     date = Unit today
-    clock = DateClock with providers; date; id; description; observers
    in DateClockUpdateEvent with
         providers
         id
