@@ -546,9 +546,9 @@ servicing LedgerParties{..} origination = do
   pure ()
 
 data OriginationSettlement = OriginationSettlement with
-  borrowerAliceUsdHolding : NonEmpty FungibleX.Fungible
-  lenderGaryBondHolding : FungibleX.Fungible
-  lenderHortenseBondHolding : FungibleX.Fungible
+  borrowerAliceUsdHolding : NonEmpty (ContractId FungibleX.Fungible)
+  lenderGaryBondHolding : ContractId FungibleX.Fungible
+  lenderHortenseBondHolding : ContractId FungibleX.Fungible
 
 settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script OriginationSettlement
 settleLoan LedgerParties {..} preOriginationStuff origination = do
@@ -683,25 +683,26 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   fungibles <- filter ((`Prelude.elem` settlementFungibleCids) . fst) . mconcat <$>
     forA settlementParties (query @FungibleX.Fungible)
 
-  let settlementFungibleMap : Map.Map Party [FungibleX.Fungible] -- Owner to fungibles
-      settlementFungibleMap = createFungiblesMap (map snd fungibles)
+  let settlementFungibleMap : Map.Map Party [(ContractId FungibleX.Fungible, FungibleX.Fungible)] -- Owner to fungibles
+      settlementFungibleMap = createFungiblesMap fungibles
 
-  borrowerAliceUsdHolding <- lookupNonEmptyUsdHoldings borrower_alice settlementFungibleMap
-  lenderGaryBondHolding <- lookupSingleBondHolding lender_gary settlementFungibleMap
-  lenderHortenseBondHolding <- lookupSingleBondHolding lender_hortense settlementFungibleMap
+  borrowerAliceUsdHolding' : NonEmpty (ContractId FungibleX.Fungible, FungibleX.Fungible) <- lookupNonEmptyUsdHoldings borrower_alice settlementFungibleMap
+  lenderGaryBondHolding' : (ContractId FungibleX.Fungible, FungibleX.Fungible) <- lookupSingleBondHolding lender_gary settlementFungibleMap
+  lenderHortenseBondHolding' : (ContractId FungibleX.Fungible, FungibleX.Fungible) <- lookupSingleBondHolding lender_hortense settlementFungibleMap
 
   return $ OriginationSettlement with
-    borrowerAliceUsdHolding
-    lenderGaryBondHolding
-    lenderHortenseBondHolding
+    borrowerAliceUsdHolding = fst <$> borrowerAliceUsdHolding'
+    lenderGaryBondHolding = fst lenderGaryBondHolding'
+    lenderHortenseBondHolding = fst lenderHortenseBondHolding'
   where
     createFungiblesMap
-      : [FungibleX.Fungible]
-      -> Map.Map Party [FungibleX.Fungible] -- Owner to fungibles
+      : [(a, FungibleX.Fungible)]
+      -> Map.Map Party [(a, FungibleX.Fungible)] -- Owner to fungibles
     createFungiblesMap fungiblesList =
-      Map.fromListWith (++) $ fungiblesList <&> \fungible ->
-        (fungible.account.owner, [fungible])
+      Map.fromListWith (++) $ fungiblesList <&> \(a, fungible) ->
+        (fungible.account.owner, [(a, fungible)])
 
+    lookupNonEmptyUsdHoldings : Show a => Party -> Map Party [(a, FungibleX.Fungible)] -> Script (NonEmpty (a, FungibleX.Fungible))
     lookupNonEmptyUsdHoldings party settlementFungibleMap =
       let bondCurrency = origination.bond.instrument.currency
       in optional
@@ -710,15 +711,16 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
           optional
             (fail $ show party <> " has no holdings of " <> show bondCurrency)
             pure
-            (NE.nonEmpty $ filter ((== bondCurrency) . (.instrument)) values)
+            (NE.nonEmpty $ filter ((== bondCurrency) . (.instrument) . snd) values)
         )
         (Map.lookup party settlementFungibleMap)
 
     lookupSingleBondHolding
       :  ActionFail m
+      => Show a
       => Party
-      -> Map.Map Party [FungibleX.Fungible]
-      -> m FungibleX.Fungible
+      -> Map.Map Party [(a, FungibleX.Fungible)]
+      -> m (a, FungibleX.Fungible)
     lookupSingleBondHolding party settlementFungibleMap = optional
       (fail $ show party <> " not found in settlementFungibleMap: " <> show settlementFungibleMap)
       (\values ->
@@ -729,19 +731,9 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
               then pure $ head $ NE.toList nonEmptyBondsList
               else fail $ "Expected " <> show party <> " to hold exactly one Alice-bond"
           )
-          (NE.nonEmpty $ filter ((== origination.bond.reference) . (.instrument)) values)
+          (NE.nonEmpty $ filter ((== origination.bond.reference) . (.instrument) . snd) values)
       )
       (Map.lookup lender_hortense settlementFungibleMap)
-
-
-    debugPrintFungiblesFor prefix parties holdingCids = do
-      res <- mconcat <$> forA parties (query @FungibleX.Fungible)
-      let allFungibles = filter ((`Prelude.elem` holdingCids) . fst) res
-          partyToFungible : Map.Map Party [FungibleX.Fungible]
-          partyToFungible = createFungiblesMap (map snd allFungibles)
-      forA_ (Map.toList partyToFungible) $ \(party, fungibleList) -> do
-        debugRaw $ prefix <> ": " <> show party
-        forA_ fungibleList $ \fungible -> debugRaw $ "\t" <> show fungible
 
 createRouteProvider : LedgerParties -> Script (ContractId RouteProvider.I)
 createRouteProvider LedgerParties {..} = do
