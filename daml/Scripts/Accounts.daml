@@ -10,6 +10,8 @@ import Daml.Finance.Interface.Account.Factory qualified as Account
 import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 
+import Util.Display
+
 -- | Only a subset of the parties involved need to have accounts
 -- to exercise the lifecycle of the loan.
 -- In particular, the depository/issuer, and underwriters do not
@@ -35,28 +37,33 @@ makeAndFundAccount
   -> Party
   -> Numeric 10
   -> Script (AccountKey, Optional (ContractId Holding.I))
-makeAndFundAccount custodian instrument accountFactoryCid holdingFactoryCid party amount = do
-   accountRequestCid <- submit party do
-     createCmd CreateAccount.Request with custodian; owner = party
+makeAndFundAccount custodian instrument accountFactoryCid holdingFactoryCid owner amount = do
+  account <- makeAccount (display instrument) accountFactoryCid holdingFactoryCid owner custodian
+  holdingCid <- if (amount > 0.0)
+      then do
+        allocationRequestCid <- submit owner do
+          createCmd CreditAccount.Request with
+            account
+            instrument
+            amount
 
-   account <- submit custodian do
-     exerciseCmd accountRequestCid CreateAccount.Accept with
-       label = show party
-       description = show party <> "'s account at the fed"
-       accountFactoryCid = accountFactoryCid
-       holdingFactoryCid
-       observers = []
+        holdingCid <- submit custodian do exerciseCmd allocationRequestCid CreditAccount.Accept
+        pure $ Some holdingCid
+      else pure None
+  return (account, holdingCid)
 
-   holdingCid <- if (amount > 0.0)
-       then do
-         allocationRequestCid <- submit party do
-           createCmd CreditAccount.Request with
-             account
-             instrument
-             amount
-
-         holdingCid <- submit custodian do exerciseCmd allocationRequestCid CreditAccount.Accept
-         pure $ Some holdingCid
-       else pure None
-   return (account, holdingCid)
-
+makeAccount : Text -> ContractId Account.F -> ContractId Holding.F -> Party -> Party -> Script AccountKey
+makeAccount label accountFactoryCid holdingFactoryCid owner custodian = do
+  accountRequestCid <- submit owner do
+    createCmd CreateAccount.Request with
+      custodian
+      owner
+  k <- submit custodian do
+    exerciseCmd accountRequestCid CreateAccount.Accept with
+        label = show owner <> "@" <> label
+        description = "Holding account"
+        accountFactoryCid
+        holdingFactoryCid
+        observers = [custodian]
+  log k
+  pure k

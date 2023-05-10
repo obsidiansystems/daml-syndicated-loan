@@ -119,6 +119,7 @@ preOrigination LedgerParties{..} = do
             [borrower_alice, borrower_bob]
 
     let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
+    log "-- Creating accounts --"
     fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
       provider = agent_charlie
       observers = Map.empty
@@ -147,36 +148,16 @@ preOrigination LedgerParties{..} = do
     -- ...for Hortenses's Bank
     (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense 100_000_000.00
 
-    -- Hortense's bond account (request)
-    hortenseBondAccountRequestCid <- submit lender_hortense do
-      createCmd CreateAccount.Request with
-        custodian = borrower_alice
-        owner = lender_hortense
-    -- Hortense's bond account (accept)
-    hortenseBondAccount <- submit borrower_alice do
-      exerciseCmd hortenseBondAccountRequestCid CreateAccount.Accept with
-          label = "HortenseBond@Bank"
-          description = "Account for Hortense's holding of Alice's Bond at Bank"
-          accountFactoryCid = accountFactoryCid
-          holdingFactoryCid = holdingFactoryCid
-          observers = [borrower_alice]
+    let makeBondAccount = makeAccount "Bond" accountFactoryCid holdingFactoryCid
+
+    -- Hortense's bond account
+    hortenseBondAccount <- makeBondAccount lender_hortense borrower_alice
 
     -- ...for Gary's Bank
     (garyAccount, Some garyCashHoldingCid) <- mkCashAccount lender_gary 70_000_000.00
 
-    -- Gary's bond account (request)
-    garyBondAccountRequestCid <- submit lender_gary do
-      createCmd CreateAccount.Request with
-        custodian = borrower_alice
-        owner = lender_gary
-    -- Gary's bond account (accept)
-    garyBondAccount <- submit borrower_alice do
-      exerciseCmd garyBondAccountRequestCid CreateAccount.Accept with
-          label = "GaryBond@Bank"
-          description = "Account for Gary's holding of Alice's Bond at Bank"
-          accountFactoryCid = accountFactoryCid
-          holdingFactoryCid = holdingFactoryCid
-          observers = [borrower_alice]
+    -- Gary's bond account
+    garyBondAccount <- makeBondAccount lender_gary borrower_alice
 
     -- ...for Bob's Company
     (bobAccount, None) <- mkCashAccount borrower_bob 0.0
@@ -185,18 +166,7 @@ preOrigination LedgerParties{..} = do
     (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice 250_684.9315
 
     -- Alices's bond account (request)
-    aliceBondAccountRequestCid <- submit borrower_alice do
-      createCmd CreateAccount.Request with
-        custodian = borrower_alice
-        owner = borrower_alice
-    -- Alices's bond account (accept)
-    aliceBondAccount <- submit borrower_alice do
-      exerciseCmd aliceBondAccountRequestCid CreateAccount.Accept with
-          label = "AliceBond@Bank"
-          description = "Account for Alice's holding of Alice's Bond at Bank" -- Necessary because the custodian of USD and bond accounts differ
-          accountFactoryCid = accountFactoryCid
-          holdingFactoryCid = holdingFactoryCid
-          observers = []
+    aliceBondAccount <- makeBondAccount borrower_alice borrower_alice
 
     -- ...for Charlie's agency
     (charlieAccount, None) <- mkCashAccount agent_charlie 0.0
