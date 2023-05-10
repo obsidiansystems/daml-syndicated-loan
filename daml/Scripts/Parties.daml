@@ -23,17 +23,7 @@ data LedgerParties = LedgerParties with
   deriving (Show, Eq, Ord)
 
 instance Display LedgerParties where
-  display p = T.intercalate "\n" $ map display
-    [ p.borrower_alice
-    , p.borrower_bob
-    , p.agent_charlie
-    , p.agent_debbie
-    , p.underwriter_emma
-    , p.underwriter_fred
-    , p.lender_gary
-    , p.lender_hortense
-    , p.fed
-    ]
+  display = T.intercalate "\n" . map display . Set.toList . allParties
 
 instance Display Party where
   display = show

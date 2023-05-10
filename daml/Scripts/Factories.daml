@@ -1,0 +1,49 @@
+module Scripts.Factories where
+
+import DA.Map (Map)
+import DA.Map qualified as Map
+import DA.Set (Set)
+import Daml.Script
+
+import Daml.Finance.Account.Account qualified as Account (Factory(..))
+import Daml.Finance.Holding.Fungible qualified as Fungible
+import Daml.Finance.Instrument.Bond.FixedRate.Factory qualified as FixedRate (Factory (..))
+import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
+import Daml.Finance.Settlement.Factory qualified as Settlement (Factory(..))
+
+accountFactory : Party -> Set Party -> Script (ContractId Account.F)
+accountFactory provider obs = do
+  accountFactoryCid <- submit provider do
+    createCmd Account.Factory
+      with
+        provider
+        observers = Map.fromList $ (::[]) $ ("observers",) obs
+  pure $ toInterfaceContractId @Account.F accountFactoryCid
+
+holdingFactory : Party -> Set Party -> Script (ContractId Holding.F)
+holdingFactory provider observers = do
+  toInterfaceContractId @Holding.F <$> submit provider do
+    createCmd Fungible.Factory with
+      provider
+      observers = Map.fromList $ (::[]) $ ("observers",) observers
+
+fixedRateFactory
+  : HasToInterface FixedRate.Factory i
+  => Party
+  -> Map Text (Set Party)
+  -> Script (ContractId i)
+fixedRateFactory provider observers = do
+  fmap toInterfaceContractId $ submit provider $ createCmd $ FixedRate.Factory with
+    provider
+    observers
+
+settlementFactory : Party -> Set Party -> Script (ContractId Settlement.F)
+settlementFactory provider observers = do
+  toInterfaceContractId @Settlement.F <$> submit provider do
+    createCmd Settlement.Factory with
+      provider
+      observers
+-- 
+-- 
