@@ -379,24 +379,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     (Map.keys fundingSelection_selected)
   -- Agent declines leftover funding interests
   forA_ fundingSelection_declined $ \declinedCid -> submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
-
-
-  -- Agent creates a route provider explaining how payments should flow between involved parties
-  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
-      createCmd IntermediatedStatic with
-        provider = agent_charlie
-        observers = Set.fromList [borrower_alice, lender_gary, lender_hortense]
-        paths = Map.fromList
-          [ ("LoanInstrument", Hierarchy with
-              rootCustodian = borrower_alice
-              pathsToRootCustodian = [[lender_gary], [lender_hortense]]
-            )
-          , ("USD", Hierarchy with
-              rootCustodian = fed
-              pathsToRootCustodian = [[borrower_alice], [lender_gary], [lender_hortense]]
-            )
-          ]
-
+  
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
