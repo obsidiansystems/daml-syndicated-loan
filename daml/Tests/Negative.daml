@@ -104,17 +104,31 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     submitMustFail borrower_bob $ createCmd aliceLoanApplication
 
     -- Alice submits her application
-    aliceApplicationCid <- submit borrower_alice $ createCmd aliceLoanApplication
+    aliceSubmittedApplicationCid <- submit borrower_alice $ createCmd aliceLoanApplication
     -- Only alice and her agent charlie should be able to see the application
+    testVisibility ps [ borrower_alice, agent_charlie ] aliceSubmittedApplicationCid
+
+    -- Charlie accepts the application, they are the only one who is able to do so
+    -- They use a uuid to keep track of alice's application through the workflow
+    let aliceApplicationUuid = "negative_alice"
+    aliceApplicationCid <- testExercise ps agent_charlie aliceSubmittedApplicationCid LoanApplicationSubmission_Accept with
+        uuid = aliceApplicationUuid
+
+    -- It is the case that only alice and charlie can see the accepted application
     testVisibility ps [ borrower_alice, agent_charlie ] aliceApplicationCid
+
+    -- To maintain the privacy of the underwriters and the lenders, Charlie kicks off a workflow not involving the borrower as a signatory
+    -- Later on, we will ensure that the loan agreement corresponds with the application Alice submitted.
+    aliceApplicationProcessCid <- testExercise ps agent_charlie aliceApplicationCid AcceptedLoanApplication_StartProcess
 
     -- Charlie submits alice's application to an underwriter— NO ONE else has
     -- the authority to do so.
-    -- They use a uuid to keep track of alice's application through the workflow
-    let aliceApplicationUuid = "negative_alice"
-    aliceUnderwritingRequestCid <- testExercise ps agent_charlie aliceApplicationCid LoanApplicationSubmission_CreateUnderwritingRequest with
+    --
+    -- NOTE: This emits a divulgence warning as Alice is a witness to the creation of the loan application process,
+    -- but she cannot exercise the choice all the same. Moreover, she is not aware of any underwriting requests
+    -- made through this exercise.
+    aliceUnderwritingRequestCid <- testExercise ps agent_charlie aliceApplicationProcessCid LoanApplicationProcess_CreateUnderwritingRequest with
         underwriter = underwriter_emma
-        uuid = aliceApplicationUuid
     -- The underwriter does not see the original application
     testVisibility ps [ borrower_alice, agent_charlie ] aliceApplicationCid
     -- Nor does alice see the underwriting request

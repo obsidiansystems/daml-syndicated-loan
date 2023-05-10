@@ -378,8 +378,15 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   log loanApplicationSubmission
   -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplicationSubmission
+  -- Agent accepts it
+  acceptedApplication <- submit agent_charlie $ exerciseCmd application LoanApplicationSubmission_Accept
+    with
+      uuid
+  -- Agent kicks off the loan application process
+  applicationProcess <- submit agent_charlie $ exerciseCmd acceptedApplication AcceptedLoanApplication_StartProcess
   -- Agent coordinating the lending first asks an underwriter for a report
-  underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma uuid application)
+  underwritingRequest <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_CreateUnderwritingRequest with
+    underwriter = underwriter_emma
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
   -- Agent goes back to the borrower with a mandate letter offer
   mandateLetterOffer <- submit agent_charlie $ exerciseCmd underwritingResult UnderwritingResult_OfferMandateLetter
@@ -505,11 +512,6 @@ makeFundingInterest : Party -> ContractId FundingRequest -> (Decimal, RatePerAnn
 makeFundingInterest lender requestCid (amount, rate) = exerciseCmd requestCid FundingRequest_Respond with
     amount = (amount - 1.0)
     rate
-
-makeUnderwritingRequest : Party -> Text -> ContractId LoanApplicationSubmission -> Commands (ContractId UnderwritingRequest)
-makeUnderwritingRequest underwriter uuid applicationCid = exerciseCmd applicationCid LoanApplicationSubmission_CreateUnderwritingRequest with
-  underwriter
-  uuid
 
 data FundingSelection = FundingSelection
   with
