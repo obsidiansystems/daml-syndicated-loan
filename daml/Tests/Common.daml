@@ -515,16 +515,7 @@ acceptLoanProposal borrower offerCid = do
 
 servicing : LedgerParties -> Origination -> Script ()
 servicing LedgerParties{..} origination = do
-  {-
-  rule <- fmap (toInterfaceContractId @ClaimI.I) $
-    submit agent $ createCmd $ Claim.Rule with
-      providers = Set.fromList [agent, bob]
-      claimers = bob
-      settlers = bob
-      Claim.routeProviderCid = routeProviderCid
-      settlementFactoryCid
-      netInstructions
-  -}
+
   pure ()
 
 settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script ()
