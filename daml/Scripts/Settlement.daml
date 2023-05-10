@@ -20,7 +20,6 @@ import Daml.Finance.Settlement.Batch qualified as B
 
 import Scripts.Parties
 import Tests.Common
-import Tests.IDE
 import Util.Display
 import Util.Script
 import Workflow.Origination
