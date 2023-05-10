@@ -18,6 +18,7 @@ import Daml.Finance.Lifecycle.Rule.Claim as Claim
 import Daml.Finance.Interface.Lifecycle.Rule.Claim as ClaimI
 --import Daml.Finance.Claims.Lifecycle.Rule as Lifecycle (Rule(..))
 import qualified Daml.Finance.Interface.Lifecycle.Rule.Lifecycle as Lifecycle
+import qualified Daml.Finance.Interface.Claims.Claim as C
 import qualified DA.Map as Map
 import DA.Time (days, time)
 import Workflow.Util
@@ -123,6 +124,9 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
 
   orig <- origination (LedgerParties{..}) (PreOriginationStuff{..})
   now <- getTime
+
+  result <- submit agent_charlie $ exerciseCmd (toInterfaceContractId @C.Claim orig.bond.cid) C.GetClaims with actor = agent_charlie
+  debug $ show result
 
   let borrower = borrower_alice
       lender = lender_gary
