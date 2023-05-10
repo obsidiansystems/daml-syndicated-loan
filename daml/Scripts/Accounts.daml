@@ -18,15 +18,15 @@ import Util.Display
 -- need accounts.
 data LedgerAccounts = LedgerAccounts with
     aliceAccount : AccountKey
-    aliceBondAccount : AccountKey
+    aliceLoanAccount : AccountKey
     bobAccount : AccountKey
     charlieAccount : AccountKey
-    charlieBondAccount : AccountKey
+    charlieLoanAccount : AccountKey
     debbieAccount : AccountKey
     garyAccount : AccountKey -- Cash account
-    garyBondAccount : AccountKey
+    garyLoanAccount : AccountKey
     hortenseAccount : AccountKey
-    hortenseBondAccount : AccountKey
+    hortenseLoanAccount : AccountKey
   deriving (Show, Eq, Ord)
 
 -- | Make and optionally fund an account

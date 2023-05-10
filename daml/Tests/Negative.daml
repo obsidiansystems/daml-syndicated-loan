@@ -95,10 +95,12 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- With the consent of the borrower in hand, Charlie can disclose the underwriting report to the lenders,
     -- and request funding based on the report.
     let prospectiveLenders = [ lender_gary, lender_hortense ]
+    
+    mandateLetterTokenCid <- testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_CreateToken
     fundingRequests <- forA prospectiveLenders $ \lender -> do
         disclosedUnderwritingReportCid <- testExercise ps agent_charlie aliceUnderwritingCid UnderwritingResult_Disclose with
             disclose_to = lender
-            mandateLetterCid = aliceMandateLetterCid
+            mandateLetterTokenCid = mandateLetterTokenCid
         -- only charlie and this specific lender can see this disclosure
         testVisibility ps [lender, agent_charlie] disclosedUnderwritingReportCid
 

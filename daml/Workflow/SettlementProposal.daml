@@ -30,19 +30,19 @@ template SettlementProposal
     bond : InstrumentKey
     settled : Bool -- Has the 'Settle' been exercised already?
   where
-    signatory loan.agreement.agent::sigAccumulator
-    observer loan.agreement.borrower::(map fst $ Map.toList loan.agreement.participantsWithAmounts)
+    signatory loan.loanAgreement.agent::sigAccumulator
+    observer loan.loanAgreement.borrower::(map fst $ Map.toList loan.loanAgreement.participantsWithAmounts)
 
     choice Settle : (ContractId SettlementProposal, (ContractId Batch.I, [ContractId Instruction.I]))
-      controller loan.agreement.borrower
+      controller loan.loanAgreement.borrower
       do
-        let allParties = loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+        let allParties = loan.loanAgreement.borrower :: Map.keys loan.loanAgreement.participantsWithAmounts
         assertMsg "Already settled" $ not settled
         assertMsg ("Missing signatures. Expected: " <> show allParties <> ", found: " <> show sigAccumulator) $
           sort sigAccumulator == sort allParties
         let id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         newCid <- create this with settled = True
-        res <- settleTransactions loan.agreement allParties id routeProviderCid settlementFactoryCid bond
+        res <- settleTransactions loan.loanAgreement allParties id routeProviderCid settlementFactoryCid bond
         pure (newCid, res)
 
     choice Add_Signature : ContractId SettlementProposal
@@ -50,27 +50,27 @@ template SettlementProposal
         party : Party
       controller party
       do
-        let allParties = loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+        let allParties = loan.loanAgreement.borrower :: Map.keys loan.loanAgreement.participantsWithAmounts
         assertMsg ("Not an authorized party: " <> show party) $ elem party allParties
         create this with sigAccumulator = party :: sigAccumulator
 
     choice Decline : ()
       -- ^ Decline the request.
-      controller loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+      controller loan.loanAgreement.borrower :: Map.keys loan.loanAgreement.participantsWithAmounts
       do pure ()
 
     choice Withdraw : ()
       -- ^ Withdraw the request.
-      controller loan.agreement.agent
+      controller loan.loanAgreement.agent
       do pure ()
     choice ExecuteSettlement : [ContractId Base.Base]
       with
         batchCid : ContractId Batch.I
-      controller loan.agreement.agent
+      controller loan.loanAgreement.agent
       do
         -- TODO: Check to make sure all signatures are in place
         exercise batchCid Batch.Settle with
-          actors = Set.singleton loan.agreement.borrower
+          actors = Set.singleton loan.loanAgreement.borrower
 
 settleTransactions :
   (HasField "agent" r1 Party
