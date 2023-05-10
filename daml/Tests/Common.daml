@@ -260,9 +260,10 @@ preOrigination LedgerParties{..} = do
       createCmd CreditAccount.Request with
         account = aliceAccount
         instrument = usdInstrument
-        amount = 2_000.00
+        amount = 501_369.863
 
     aliceCashHoldingCid <- submit fed_ingrid do exerciseCmd aliceRequestCid CreditAccount.Accept
+
 
     -- ...for Charlie's agency
     charlieRequestCid <- submit agent_charlie do
@@ -317,7 +318,7 @@ origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
-      uuid = "golden"
+      uuid = "LoanInstrument"
       loanApplication = LoanApplication with
         borrower = borrower_alice
         agent = agent_charlie
@@ -366,10 +367,10 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
 
   aliceAccountRequestCid <- submit borrower_alice do
     createCmd CreateAccount.Request with
-      custodian = fed_ingrid
+      custodian = borrower_alice
       owner = borrower_alice
 
-  aliceBondAccountKey <- submit fed_ingrid do
+  aliceBondAccountKey <- submit borrower_alice do
     exerciseCmd aliceAccountRequestCid CreateAccount.Accept with
         label = "AliceBond@Bank"
         description = "Account for Alice's Bond at Bank"
@@ -388,10 +389,10 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
 
   garyAccountRequestCid <- submit lender_gary do
     createCmd CreateAccount.Request with
-      custodian = fed_ingrid
+      custodian = borrower_alice
       owner = lender_gary
 
-  garyBondAccountKey <- submit fed_ingrid do
+  garyBondAccountKey <- submit borrower_alice do
     exerciseCmd garyAccountRequestCid CreateAccount.Accept with
         label = "GaryBond@Bank"
         description = "Account for Gary's holding of Alice's Bond at Bank"
@@ -510,7 +511,6 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
         uuid = acceptance.uuid
         prospectus = acceptance.applicationData.prospectus
         loanTerms = acceptance.terms
-
   submit agent $ createCmd PendingLoanAgreement with
     agreement
     signed = []
@@ -668,7 +668,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   --       actors = S.singleton agent_charlie
 
   -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
-  _ <- submit borrower_alice do
+  settlementBases <- submit borrower_alice do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
   return ()

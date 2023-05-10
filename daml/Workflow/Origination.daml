@@ -305,6 +305,7 @@ template PendingLoanAgreement
       do
         a <- create this.agreement
         now <- getTime -- TODO: reconsider if this is appropriate
+        debug $ show this.agreement
         let bond = loanAgreementToBond now this.agreement.loanTerms.instrument this.agreement
         b <- createBond bond
         return (a,b)
@@ -320,7 +321,7 @@ loanAgreementToBond
 loanAgreementToBond now usd a =
   let numberOfParticipants = Map.size a.participantsWithAmounts
   in Instrument with
-    depository = a.agent -- TODO: A bit odd
+    depository = a.borrower -- a.agent -- TODO: A bit odd
     issuer = a.borrower
     id = Id a.uuid
     version = "0"

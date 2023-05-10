@@ -30,13 +30,14 @@ data Bond = Bond
   with
     instrument : BondInstrument
     reference : InstrumentKey
-    cid : ContractId (BaseInstrument.I)
+    cid : ContractId Instrument
   deriving (Eq, Show)
 
 createBond : BondInstrument -> Update Bond
 createBond instrument = do
-  cid <- toInterfaceContractId @BaseInstrument.I <$> create instrument
-  reference <- createReference cid instrument.depository instrument.issuer instrument.observers
+  cid <- create instrument
+  let cid' = toInterfaceContractId @BaseInstrument.I cid
+  reference <- createReference cid' instrument.depository instrument.issuer instrument.observers
   return Bond with
     instrument
     reference
@@ -44,9 +45,10 @@ createBond instrument = do
 
 createBondS : BondInstrument -> Script Bond
 createBondS instrument = do
-  cid <- toInterfaceContractId @BaseInstrument.I <$> submit instrument.depository do
+  cid <- submit instrument.depository do
     createCmd instrument
-  reference <- createReferenceS cid instrument.depository instrument.issuer instrument.observers
+  let cid' = toInterfaceContractId @BaseInstrument.I cid
+  reference <- createReferenceS cid' instrument.depository instrument.issuer instrument.observers
   return Bond with
     instrument
     reference
