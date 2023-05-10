@@ -61,7 +61,7 @@ template Helper with
       controller p
       do
         let thing = zip receiverAccounts cids
-        forA thing $ \(a, b) -> do
+        forA thing $ \(a, _b) -> do
           create Transfer.Request with
             receiverAccount = a
             instrument
@@ -503,7 +503,7 @@ makeFundingRequest agent amount underwriteCid mandateLetterCid lender = do
         disclose_to = lender
         mandateLetterCid
     submit agent $ exerciseCmd disclosedUnderwriting MakeFundingRequest with
-        participant = lender
+        requestee = lender
 
 getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
 getFundingRequestsFor lender = query @FundingRequest lender

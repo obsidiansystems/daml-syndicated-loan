@@ -9,12 +9,12 @@ import DA.Time (time)
 
 import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule (Rule(..))
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
-import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I(..), ClaimEffect(..))
+import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I, ClaimEffect(..))
 import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle (Lifecycle, Evolve(..))
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
-import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F(..))
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (Allocate(..), Approve(..))
-import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider (I(..))
+import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider (I)
 import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
 import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
 import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
@@ -27,6 +27,7 @@ import Daml.Finance.Settlement.Factory (observers, provider, Factory(Factory))
 import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
 import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 
+import Scripts.Util
 import Tests.Common
 import Tests.IDE
 import Util.Display
@@ -171,7 +172,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       settlementFactoryCid
       netInstructions = False
 
-  (newBondOpt, [effectCid]) <- submitMulti [agent, borrower] [] $
+  (_newBondOpt, [effectCid]) <- submitMulti [agent, borrower] [] $
     exerciseCmd lifecycleRule Lifecycle.Evolve with
       eventCid = updateEventCid
       instrument = orig.bond.reference
@@ -190,30 +191,30 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
   (bondConsumed2, _) <- submit lender $ exerciseCmd bondConsumed Instruction.Allocate with
     actors = Set.fromList [lender]
     allocation = Pledge orig.garyBondHoldingKey
-  submit borrower $ exerciseCmd bondConsumed2 Instruction.Approve with
+  submit_ borrower $ exerciseCmd bondConsumed2 Instruction.Approve with
     actors = Set.fromList [borrower]
     approval = DebitSender
 
   (bondProduced2, _) <- submit borrower $ exerciseCmd bondProduced Instruction.Allocate with
     actors = Set.fromList [borrower]
     allocation = CreditReceiver
-  submit lender $ exerciseCmd bondProduced2 Instruction.Approve with
+  submit_ lender $ exerciseCmd bondProduced2 Instruction.Approve with
     actors = Set.fromList [lender]
     approval = TakeDelivery orig.garyBondAccountKey
 
   (couponProduced2, _) <- submit borrower $ exerciseCmd couponProduced Instruction.Allocate with
     actors = Set.fromList [borrower]
     allocation = Pledge aliceCashHoldingCid
-  submit lender $ exerciseCmd couponProduced2 Instruction.Approve with
+  submit_ lender $ exerciseCmd couponProduced2 Instruction.Approve with
     actors = Set.fromList [lender]
     approval = TakeDelivery ledgerAccounts.garyAccount
 
-  batch <- logLedger
+  logLedger
     borrower_alice
     ("No batch found for: " <> show claimResult.batchCid)
     (fromInterfaceContractId @B.Batch claimResult.batchCid)
 
-  submitMulti [borrower_alice, agent_charlie] [] do
+  submitMulti_ [borrower_alice, agent_charlie] [] do
     exerciseCmd claimResult.batchCid Batch.Settle with
       actors = Set.fromList [borrower_alice, agent_charlie]
 
