@@ -146,7 +146,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
 
   orig <- origination (LedgerParties{..}) (PreOriginationStuff{..})
   now <- getTime
-  result <- submit agent_charlie $ exerciseCmd (toInterfaceContractId @C.Claim orig.loanAgreement.bondCid) C.GetClaims with actor = agent_charlie
+  result <- submit borrower_alice $ exerciseCmd (toInterfaceContractId @C.Claim orig.loanAgreement.bondCid) C.GetClaims with actor = borrower_alice
   debug $ show result
 
   let (y',m',d') = toGregorian (toDateUTC now)
