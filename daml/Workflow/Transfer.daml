@@ -31,8 +31,10 @@ template Request
       do
         -- Sanity checks
         holding <- fetch holdingCid
-        getAmount holding === amount
-        getInstrument holding === instrument
+        assertMsg ("holding amount must equal amount: " <> show (getAmount holding, amount)) $
+          getAmount holding == amount
+        assertMsg ("holding instrument must equal instrument: " <> show (getInstrument holding, instrument)) $
+          getInstrument holding == instrument
 
         -- DO_TRANSFER_BEGIN
         let transferableCid = coerceInterfaceContractId @Transferable.I holdingCid
