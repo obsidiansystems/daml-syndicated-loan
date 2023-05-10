@@ -36,6 +36,8 @@ import qualified Daml.Finance.Interface.Settlement.Batch as Batch
 
 import qualified Daml.Finance.Settlement.Batch as B
 import DA.Foldable (forA_)
+import qualified Daml.Finance.Interface.Settlement.Instruction as Instruction
+import Daml.Finance.Interface.Settlement.Types (Allocation(Pledge))
 
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
@@ -158,8 +160,8 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       providers = Set.fromList [borrower]
       observers = Map.fromList
         [ ("borrower", Set.singleton borrower)
-        , ("lender", Set.singleton lender_gary)
-        , ("agent", Set.singleton agent_charlie)
+        , ("lender", Set.singleton lender)
+        , ("agent", Set.singleton agent)
         ]
       lifecycler = agent
       id = Id "LifecycleRule"
@@ -168,29 +170,33 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
   claimRule <- fmap (toInterfaceContractId @ClaimI.I) $
     submit borrower_alice $ createCmd $ Claim.Rule with
       providers = Set.fromList [borrower]
-      claimers = Set.singleton lender_gary
-      settlers = Set.singleton lender_gary
+      claimers = Set.singleton lender
+      settlers = Set.fromList [lender, borrower, agent]
       routeProviderCid
       settlementFactoryCid
       netInstructions = False
 
-  (newBondOpt, [effectCid]) <- submitMulti [agent_charlie, borrower_alice] [] $
+  (newBondOpt, [effectCid]) <- submitMulti [agent, borrower] [] $
     exerciseCmd lifecycleRule Lifecycle.Evolve with
       eventCid = updateEventCid
       instrument = orig.bond.reference
       observableCids = []
 
-  claimResult <- submitMulti [agent_charlie, borrower_alice, lender_gary] [] $
+  claimResult <- submitMulti [agent, borrower, lender] [] $
     exerciseCmd claimRule ClaimI.ClaimEffect with
-      claimer = lender_gary
+      claimer = lender
       holdingCids = [orig.garyBondHoldingKey]
       effectCid
       batchId = Id "Loan interest payment"
 
-  --  "ClaimResult {batchCid = 005a721ff9bbbe25b7822fe7ae736d364e4b2f4482cc9412226396d7a1705c3e99, instructionCids = [00578216f491920b727b6133e088f032698ed371746825c44448103595ff1ca284,005e20ed7dc4fb8d5f779d9a9b404efa9b1d528b73376f0a1b356d246ea01402ba,004413d0a144deeca3409bcd04984f87d3033c2fac531187c6b557cc9a0f96dbe8]}"
-
   -- Allocate and Approve
-  let [claimerInstruction, bankInstruction, couponInstruction] = claimResult.instructionCids
+  let [bondConsumed, bondProduced, couponProduced] = claimResult.instructionCids
+
+  submit lender $ exerciseCmd bondConsumed Instruction.Allocate with
+    actors = Set.fromList [lender]
+    allocation = Pledge orig.garyBondHoldingKey
+
+
   batch <- queryContractId borrower_alice $ fromInterfaceContractId @B.Batch claimResult.batchCid
   case batch of
     None -> debug $ "No batch found for: " <> show claimResult.batchCid
