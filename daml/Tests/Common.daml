@@ -110,7 +110,7 @@ perfTest LedgerParties{..} = do
     debug $ "Hortense"
 
     accounts_hortense <- createAccounts LedgerParties{..} (accountFactoryCid, holdingFactoryCid) 3000
-    SplitResult{..} <- setupBorrower LedgerParties{..} config 1
+    SplitResult{..} <- setupBorrower LedgerParties{..} config 3000
 
     acchelper_hortense <- submit lender_hortense $
       createCmd Helper with

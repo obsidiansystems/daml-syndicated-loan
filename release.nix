@@ -16,6 +16,15 @@ in
       mkdir $out
       ${damlSdk.sdk}/bin/daml test
       ${damlSdk.sdk}/bin/daml build -o $out/package.dar
-      find $src/daml/Workflow -name "*.daml" -type f -print0 | xargs -0 grep -o "import Daml.Finance.*" | grep -Ev "${excludeWorkflowModules}"
+
+      find_modules=$(find $src/daml/Workflow -name "*.daml" -type f -print0 | xargs -0 grep -o "import Daml.Finance.*" | grep -Ev "${excludeWorkflowModules}")
+      if [[ $? == 0 ]]; then
+        for i in $find_modules; do
+          echo "''${i%%:*}"
+        done
+        exit 127
+      else
+        echo "SUCCESS"
+      fi
     '';
 }
