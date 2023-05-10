@@ -19,6 +19,7 @@ module Tests.Common
 -}
 
 import DA.Action
+import DA.Date (date, toGregorian, toDateUTC)
 import DA.Foldable
 import DA.Functor
 import DA.List qualified as L
@@ -34,23 +35,24 @@ import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible
 import Daml.Finance.Instrument.Bond.FixedRate.Factory qualified as FixedRate (Factory (..))
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
-import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate (F)
 import Daml.Finance.Interface.Holding.Base qualified as HoldingBase
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
 import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(..))
 import Daml.Finance.Interface.Holding.Fungible qualified as Fungible (Split(..))
+import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate (F)
 import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction
 import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
 import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge))
 import Daml.Finance.Interface.Types.Common.Types
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
+import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
 import Daml.Finance.Settlement.Factory qualified as Settlement (Factory(..))
 import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
-import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 import Daml.Finance.Settlement.Instruction qualified as Settlement
+import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 
 import Util.Display
-import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 import Workflow.SettlementProposal
@@ -213,9 +215,20 @@ acceptLoanApplication agent application uuid = do
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
+  now <- getTime
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
       uuid = "LoanInstrument"
+      startDate = toDateUTC now
+      (y,m,d) = toGregorian startDate
+
+      schedule = createPaymentPeriodicSchedule
+        (date (y+1) m d)
+        []
+        Following
+        Y 1
+        startDate
+        (date (y+10) m d)
       loanApplicationSubmission = LoanApplicationSubmission with
         borrower = borrower_alice
         agent = agent_charlie
@@ -225,6 +238,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
           maxInterestRate = rate
           prospectus = "Loan for acquisition of competitor"
           durationYears = 10
+          schedule
   -- Borrower submits an application for a loan
   application <- createLoanApplication loanApplicationSubmission
   -- Agent accepts it
@@ -373,6 +387,7 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
         uuid = acceptance.uuid
         prospectus = acceptance.mandateLetter.mandateLetter.prospectus
         loanTerms = acceptance.terms
+        
   submit agent $ createCmd PendingLoanAgreement with
     agreement
     signed = []
