@@ -55,8 +55,9 @@ import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 import Workflow.SettlementProposal
 
-import Scripts.Parties
 import Scripts.Accounts
+import Scripts.Common
+import Scripts.Parties
 
 data Config = Config with
   instrument : InstrumentKey
@@ -96,18 +97,10 @@ data PreOriginationStuff = PreOriginationStuff with
 -- - initial assets for the lenders
 preOrigination : LedgerParties -> Script PreOriginationStuff
 preOrigination parties@(LedgerParties{..}) = do
-    -- Create the Fed
+    -- USD instrument definition
+    let usdInstrument = mkUsd fed 
 
-    -- Create USD
-    let instrumentId = Id "USD"
-        instrumentVersion = "0"
-        usdInstrument = InstrumentKey with
-          issuer = fed
-          depository = fed
-          id = instrumentId
-          version = instrumentVersion
-
-    -- Create USD Accounts for Banks and Companies
+    -- Create Factories
     accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed do
       createCmd Account.Factory
         with
@@ -121,8 +114,6 @@ preOrigination parties@(LedgerParties{..}) = do
         observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
             [borrower_alice, borrower_bob]
 
-    let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
-    log "-- Creating accounts --"
     fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
       provider = agent_charlie
       observers = Map.empty
@@ -148,35 +139,34 @@ preOrigination parties@(LedgerParties{..}) = do
             )
           ]
 
-    -- ...for Hortenses's Bank
+    let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
+    let makeLoanAccount = makeAccount "Loan" accountFactoryCid holdingFactoryCid
+
+    log "-- Creating accounts --"
+    -- Hortense's USD account
     (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense 100_000_000.00
+    -- Hortense's loan account
+    hortenseLoanAccount <- makeLoanAccount lender_hortense borrower_alice
 
-    let makeBondAccount = makeAccount "Bond" accountFactoryCid holdingFactoryCid
-
-    -- Hortense's bond account
-    hortenseBondAccount <- makeBondAccount lender_hortense borrower_alice
-
-    -- ...for Gary's Bank
+    -- Gary's USD account
     (garyAccount, Some garyCashHoldingCid) <- mkCashAccount lender_gary 70_000_000.00
+    -- Gary's loan account
+    garyLoanAccount <- makeLoanAccount lender_gary borrower_alice
 
-    -- Gary's bond account
-    garyBondAccount <- makeBondAccount lender_gary borrower_alice
-
-    -- ...for Bob's Company
+    -- Bob's USD account
     (bobAccount, None) <- mkCashAccount borrower_bob 0.0
 
-    -- ...for Alice's Company
+    -- Alice's USD account
     (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice 250_684.9315
+    -- Alices's loan account
+    aliceLoanAccount <- makeLoanAccount borrower_alice borrower_alice
 
-    -- Alices's bond account (request)
-    aliceBondAccount <- makeBondAccount borrower_alice borrower_alice
-
-    -- ...for Charlie's agency
+    -- Charlie's USD agency
     (charlieAccount, Some charlieCashHoldingCid) <- mkCashAccount agent_charlie 6_000_000_000.00
-    -- Charlies's bond account (request)
-    charlieBondAccount <- makeBondAccount agent_charlie borrower_alice
+    -- Charlies's loan account
+    charlieLoanAccount <- makeLoanAccount agent_charlie borrower_alice
 
-    -- ...for Debbie's agency
+    -- Debbie's USD account
     (debbieAccount, None) <- mkCashAccount agent_debbie 0.0
 
     let ledgerAccounts = LedgerAccounts with ..
@@ -421,7 +411,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   -- Create a bond holding request
   aliceBondRequestCid <- submit borrower_alice do
     createCmd CreditAccount.Request with
-      account = preOriginationStuff.ledgerAccounts.aliceBondAccount
+      account = preOriginationStuff.ledgerAccounts.aliceLoanAccount
       instrument = origination.loanAgreement.bondKey
       amount = origination.loanAgreement.agreement.loanTerms.amount
 
@@ -461,7 +451,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         , ((lender_hortense, bondCurrency), Some preOriginationStuff.hortenseCashHoldingCid)
         , ((borrower_alice, bondKey), Some aliceBondHoldingKey)
         , ((agent_charlie, bondCurrency), Some preOriginationStuff.charlieCashHoldingCid)
-        -- , ((agent_charlie, bondKey), Some preOriginationStuff.ledgerAccounts.charlieBondAccount)
+        -- , ((agent_charlie, bondKey), Some preOriginationStuff.ledgerAccounts.charlieLoanAccount)
         ]
 
       f (accum, map') (icid, routedStep) = do
@@ -490,19 +480,19 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
   -- initiate Map Party AccountKey
   let partyAccountMap = Map.fromList
-        [ ((borrower_alice, bondKey), preOriginationStuff.ledgerAccounts.aliceBondAccount)
+        [ ((borrower_alice, bondKey), preOriginationStuff.ledgerAccounts.aliceLoanAccount)
         , ((borrower_alice, bondCurrency), preOriginationStuff.ledgerAccounts.aliceAccount)
 
         , ((borrower_bob, bondCurrency), preOriginationStuff.ledgerAccounts.bobAccount)
 
-        , ((lender_gary, bondKey), preOriginationStuff.ledgerAccounts.garyBondAccount)
+        , ((lender_gary, bondKey), preOriginationStuff.ledgerAccounts.garyLoanAccount)
         , ((lender_gary, bondCurrency), preOriginationStuff.ledgerAccounts.garyAccount)
 
-        , ((lender_hortense, bondKey), preOriginationStuff.ledgerAccounts.hortenseBondAccount)
+        , ((lender_hortense, bondKey), preOriginationStuff.ledgerAccounts.hortenseLoanAccount)
         , ((lender_hortense, bondCurrency), preOriginationStuff.ledgerAccounts.hortenseAccount)
 
         , ((agent_charlie, bondCurrency), preOriginationStuff.ledgerAccounts.charlieAccount)
-        , ((agent_charlie, bondKey), preOriginationStuff.ledgerAccounts.charlieBondAccount)
+        , ((agent_charlie, bondKey), preOriginationStuff.ledgerAccounts.charlieLoanAccount)
 
         , ((agent_debbie, bondCurrency), preOriginationStuff.ledgerAccounts.debbieAccount)
         ]
