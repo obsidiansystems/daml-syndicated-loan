@@ -8,8 +8,7 @@ module Tests.Common where
 
 import DA.Action
 import DA.Foldable
-import DA.List qualified as L
-import DA.List.Total (head)
+import DA.List as L
 import DA.Map (Map)
 import DA.Map qualified as Map
 import DA.Set qualified as Set
@@ -20,7 +19,7 @@ import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
 import Daml.Finance.Interface.Holding.Base qualified as B
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
-import Daml.Finance.Interface.Holding.Fungible (Fungible)
+import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(..))
 import Daml.Finance.Interface.Holding.Fungible qualified as Fungible
 import Daml.Finance.Interface.Settlement.Factory qualified as Settlement
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction
@@ -38,6 +37,28 @@ import Workflow.SettlementProposal
 import Workflow.Transfer qualified as Transfer
 import Workflow.Util
 
+-- Helper Template for test batching
+template Helper with
+    p : Party
+    fed : Party
+  where
+    signatory p
+    observer fed, p
+    choice BatchTransferRequests : [ContractId Transfer.Request]
+      with cids : [ContractId Fungible]
+           receiverAccounts : [AccountKey]
+           instrument : InstrumentKey
+           currentOwner : Party
+           amount : Decimal
+      controller p
+      do
+        let thing = zip receiverAccounts cids
+        forA thing $ \(a, b) -> do
+          create Transfer.Request with
+            receiverAccount = a
+            instrument
+            currentOwner
+            amount
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -57,6 +78,13 @@ data LedgerParties = LedgerParties with
 -- | Test that does not exercise the lending workflow as such, but
 -- exercises transfers on the ledger to help us estimate throughput
 -- of our settlement strategy.
+data Config = Config with
+  instrument : InstrumentKey
+  accountFactoryCid : ContractId Account.F
+  holdingFactoryCid : ContractId Holding.F
+
+
+
 perfTest : LedgerParties -> Script ()
 perfTest LedgerParties{..} = do
     let instrumentId = Id "USD"
@@ -73,54 +101,91 @@ perfTest LedgerParties{..} = do
     holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
       createCmd Fungible.Factory with
         provider = fed_ingrid
-        observers = Map.empty
+        observers = Map.fromList [("Alice", Set.fromList [borrower_alice])]
 
+    let config = Config with
+          instrument = usdInstrument
+          accountFactoryCid
+          holdingFactoryCid
+    debug $ "Hortense"
+
+    accounts_hortense <- createAccounts LedgerParties{..} (accountFactoryCid, holdingFactoryCid) 3000
+    SplitResult{..} <- setupBorrower LedgerParties{..} config 1
+
+    acchelper_hortense <- submit lender_hortense $
+      createCmd Helper with
+        p = lender_hortense
+        fed = fed_ingrid
+
+    debug $ "Batch Transfer Request"
+    batch_transfer_request <- submit lender_hortense $ do
+      exerciseCmd acchelper_hortense BatchTransferRequests with
+        cids = splitCids
+        receiverAccounts = accounts_hortense
+        instrument = usdInstrument
+        currentOwner = borrower_alice
+        amount = 5.0
+
+    let thing2 = zip batch_transfer_request splitCids
+        thing3 = chunksOf 100 thing2
+
+    debug $ "Length of [(ContractId Transfer.Request, ContractId Fungible)]: " <> show (L.length thing3)
+    debug $ "Splitting Accept Events.."
+    forA thing3 $ splitEvents LedgerParties{..}
+
+    debug $ show splitCids
+    debug $ show rest
+    pure ()
+
+
+-- Split up events into separate script batches to not crash the sequencer
+splitEvents : LedgerParties -> [(ContractId Transfer.Request, ContractId Fungible)] -> Script ([ContractId B.I])
+splitEvents LedgerParties{..} ids = do
+  forA ids $ \(a, b) -> do
+    debug $ "Batch Event running.. "
+    submit borrower_alice $ exerciseCmd a Transfer.Accept with
+      holdingCid = (coerceInterfaceContractId @B.Base b)
+
+
+-- Create an N number of accounts for lender_hortense
+createAccounts : LedgerParties -> (ContractId Account.F, ContractId Holding.F) -> Int -> Script [AccountKey]
+createAccounts LedgerParties{..} (accountFactoryCid, holdingFactoryCid) amount = do
+    forA [1..amount] $ \x -> do
+      account <- submit lender_hortense $ createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
+      debug $ (show account)
+      submit fed_ingrid $ do
+          exerciseCmd account CreateAccount.Accept with
+            label = (show x)
+            description = "null"
+            accountFactoryCid
+            holdingFactoryCid
+            observers = [borrower_alice]
+
+-- Setup borrower alice
+setupBorrower : LedgerParties -> Config -> Int -> Script (SplitResult)
+setupBorrower LedgerParties{..} Config{..} amount = do
     aliceReq <- submit borrower_alice do
       createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed_ingrid
     aliceAccount <- submit fed_ingrid do
       exerciseCmd aliceReq CreateAccount.Accept with
         label = "Alice@Fed"
         description = "null"
-        accountFactoryCid = accountFactoryCid
+        accountFactoryCid
         holdingFactoryCid
-        observers = []
+        observers = [borrower_alice]
     requestMon <- submit borrower_alice do
         createCmd CreditAccount.Request with
           account = aliceAccount
           instrument = InstrumentKey with
             issuer = fed_ingrid
             depository = fed_ingrid
-            id = instrumentId
-            version = instrumentVersion
+            id = instrument.id
+            version = instrument.version
           amount = 100000.0
     xv <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
-    Fungible.SplitResult{..} <- submit borrower_alice do
+    submit borrower_alice do
       exerciseCmd (coerceInterfaceContractId @Fungible xv) Fungible.Split with
-        amounts = replicate 100 5.0
-
-    accountkeys <- forA [1..100] $ \x -> do
-      requestCid <- submit lender_hortense do
-        createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
-      c <- submit fed_ingrid $ do
-        exerciseCmd requestCid CreateAccount.Accept with
-          label = (show x)
-          description = "null"
-          accountFactoryCid
-          holdingFactoryCid
-          observers = [borrower_alice]
-      pure (c)
-    pure ()
-
-    let xd = zip accountkeys splitCids
-    forA_ xd $ \(a, b) -> do
-      x <- submit lender_hortense $ do
-        createCmd Transfer.Request with
-          receiverAccount = a
-          instrument = usdInstrument
-          currentOwner = borrower_alice
-          amount = 5.0
-      submit borrower_alice $ exerciseCmd x Transfer.Accept with
-        holdingCid = (coerceInterfaceContractId @B.Base b)
+        amounts = replicate amount 5.0
 
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
@@ -316,10 +381,14 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   -- Agent coordinating the lending first asks an underwriter for a report
   underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma uuid application)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
-  -- Agent with underwriter's report in hand reaches out to possible lenders
+  -- Agent goes back to the borrower with a mandate letter offer
+  mandateLetterOffer <- submit agent_charlie $ exerciseCmd underwritingResult UnderwritingResult_OfferMandateLetter
+  acceptedMandateLetter <- submit borrower_alice $ exerciseCmd mandateLetterOffer MandateLetterOffer_Accept
+
+  -- Agent with underwriter's report and accepted mandate letter in hand reaches out to possible lenders
   let possibleLenders = [lender_gary, lender_hortense]
   forA_ possibleLenders $ \lender -> do
-    makeFundingRequest agent_charlie amount underwritingResult lender
+    makeFundingRequest agent_charlie amount underwritingResult acceptedMandateLetter lender
   -- Lenders make their offers
   -- TODO: Lenders declining to make an offer
   fundingInterestCids <- forA possibleLenders $ \lender -> do
@@ -330,7 +399,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     pure (cid, fundingInterest)
   -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
   let FundingSelection{..} = selectFundingInterests loanApplication fundingInterests
-  loanProposal <- submit agent_charlie $ createLoanProposal application uuid fundingSelection_ratePerAnnum
+  loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter uuid fundingSelection_ratePerAnnum
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
@@ -417,12 +486,14 @@ makeFundingRequest
     : Party
     -> Decimal
     -> ContractId UnderwritingResult
+    -> ContractId AcceptedMandateLetter
     -> Party
     -> Script (ContractId FundingRequest)
-makeFundingRequest agent amount underwriteCid lender = do
+makeFundingRequest agent amount underwriteCid mandateLetterCid lender = do
     Some underwrite <- queryContractId agent underwriteCid
     disclosedUnderwriting <- submit agent $ exerciseCmd underwriteCid UnderwritingResult_Disclose with
         disclose_to = lender
+        mandateLetterCid
     submit agent $ exerciseCmd disclosedUnderwriting MakeFundingRequest with
         participant = lender
 
@@ -492,14 +563,14 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
         participantsWithAmounts
         borrower = acceptance.borrower
         uuid = acceptance.uuid
-        prospectus = acceptance.applicationData.prospectus
+        prospectus = acceptance.mandateLetter.prospectus
         loanTerms = acceptance.terms
   submit agent $ createCmd PendingLoanAgreement with
     agreement
     signed = []
 
-createLoanProposal : ContractId LoanApplication -> Text -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
-createLoanProposal applicationCid uuid rate = exerciseCmd applicationCid LoanApplication_CreateOffer with
+createLoanProposal : ContractId AcceptedMandateLetter -> Text -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
+createLoanProposal applicationCid uuid rate = exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
   uuid
   rate
 
@@ -604,7 +675,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
             debug $ "splitCids: " <> show splitCids
             debug $ "rest: " <> show rest
             assertMsg "we only split a single amount" $ Prelude.length splitCids == 1
-            let Some splitCid = head splitCids
+            let Some splitCid = Some (L.head splitCids)
                 newMap = Map.insert key' (coerceInterfaceContractId @B.Base <$> rest) map'
 
             allocInstructions <- submit key' do
