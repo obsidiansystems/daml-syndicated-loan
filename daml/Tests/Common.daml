@@ -72,6 +72,7 @@ data PreOriginationStuff = PreOriginationStuff with
   accountFactoryCid : ContractId Account.F
   holdingFactoryCid : ContractId Holding.F
   fixedRateBondFactoryCid : ContractId FixedRate.F
+  settlementFactoryCid : ContractId Settlement.F
   usdInstrument : InstrumentKey
   ledgerAccounts : LedgerAccounts
   hortenseCashHoldingCid : ContractId HoldingBase.I
@@ -113,6 +114,11 @@ preOrigination LedgerParties{..} = do
     fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
       provider = agent_charlie
       observers = Map.empty
+
+    settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit borrower_alice do
+      createCmd Settlement.Factory with
+        provider = agent_charlie
+        observers = Set.fromList [borrower_alice, borrower_bob]
 
     -- ...for Hortenses's Bank
     hortenseRequestCid <- submit lender_hortense do
@@ -252,12 +258,13 @@ preOrigination LedgerParties{..} = do
     return $ PreOriginationStuff with
       accountFactoryCid
       holdingFactoryCid
+      fixedRateBondFactoryCid
+      settlementFactoryCid
       usdInstrument
       ledgerAccounts
       hortenseCashHoldingCid
       garyCashHoldingCid
       aliceCashHoldingCid
-      fixedRateBondFactoryCid
 
 data Origination = Origination with
   loanAgreement : OriginatedLoanAgreement
@@ -343,12 +350,6 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
               pathsToRootCustodian = [[borrower_alice], [lender_gary]]
             )
           ]
-
-  -- Agent creates a settlement factory
-  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
-    createCmd Settlement.Factory with
-      provider = agent_charlie
-      observers = Set.fromList [borrower_alice,lender_gary]
   
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
@@ -496,19 +497,13 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
             )
           ]
 
-  -- 2. Create Settlement Factory
-  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit borrower_alice do
-    createCmd Settlement.Factory with
-      provider = borrower_alice
-      observers = Set.fromList [borrower_bob, borrower_alice]
-
   -- Generate Settlement Proposal
   settlementProposalCid <- submit borrower_alice do
     createCmd SettlementProposal with
       loan = origination.loanAgreement
       sigAccumulator = []
       routeProviderCid
-      settlementFactoryCid
+      settlementFactoryCid = preOriginationStuff.settlementFactoryCid
       bond = origination.loanAgreement.bondKey
 
   -- Create a bond holding request
