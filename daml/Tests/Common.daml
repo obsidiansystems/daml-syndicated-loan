@@ -111,13 +111,13 @@ preOrigination LedgerParties{..} = do
         with
           provider = fed
           observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
-            [borrower_alice, borrower_bob]
+            [borrower_alice, borrower_bob, agent_charlie]
 
     holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed do
       createCmd Fungible.Factory with
         provider = fed
         observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
-            [borrower_alice, borrower_bob]
+            [borrower_alice, borrower_bob, agent_charlie]
 
     fixedRateBondFactoryCid <- fmap toInterfaceContractId $ submit agent_charlie $ createCmd $ FixedRate.Factory with
       provider = agent_charlie
@@ -129,9 +129,9 @@ preOrigination LedgerParties{..} = do
         observers = Set.fromList [borrower_alice, borrower_bob]
 
     -- Create Route Provider
-    routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit borrower_alice do
+    routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
       createCmd IntermediatedStatic with
-        provider = borrower_alice
+        provider = agent_charlie
         observers = Set.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
         paths = Map.fromList
           [ ("LoanInstrument", Hierarchy with
@@ -157,13 +157,13 @@ preOrigination LedgerParties{..} = do
         observers = []
 
     -- allocate funds to Hortense
-    hortenseRequestCid <- submit lender_hortense do
+    hortenseRequestCid2 <- submit lender_hortense do
       createCmd CreditAccount.Request with
         account = hortenseAccount
         instrument = usdInstrument
         amount = 100_000_000.00
 
-    hortenseCashHoldingCid <- submit fed do exerciseCmd hortenseRequestCid CreditAccount.Accept
+    hortenseCashHoldingCid <- submit fed do exerciseCmd hortenseRequestCid2 CreditAccount.Accept
 
     -- Hortense's bond account (request)
     hortenseBondAccountRequestCid <- submit lender_hortense do
@@ -177,7 +177,7 @@ preOrigination LedgerParties{..} = do
           description = "Account for Hortense's holding of Alice's Bond at Bank"
           accountFactoryCid = accountFactoryCid
           holdingFactoryCid = holdingFactoryCid
-          observers = [borrower_alice]
+          observers = []
 
     -- ...for Gary's Bank
     garyRequestCid <- submit lender_gary do
@@ -191,7 +191,7 @@ preOrigination LedgerParties{..} = do
         observers = []
 
     -- allocate funds to Gary
-    garyRequestCid <- submit lender_gary do
+    garyRequestCid2 <- submit lender_gary do
       createCmd CreditAccount.Request with
         account = garyAccount
         instrument = usdInstrument
@@ -209,9 +209,9 @@ preOrigination LedgerParties{..} = do
           description = "Account for Gary's holding of Alice's Bond at Bank"
           accountFactoryCid = accountFactoryCid
           holdingFactoryCid = holdingFactoryCid
-          observers = [borrower_alice]
+          observers = []
 
-    garyCashHoldingCid <- submit fed do exerciseCmd garyRequestCid CreditAccount.Accept
+    garyCashHoldingCid <- submit fed do exerciseCmd garyRequestCid2 CreditAccount.Accept
 
     -- ...for Bob's Company
     bobRequestCid <- submit borrower_bob do
@@ -233,15 +233,15 @@ preOrigination LedgerParties{..} = do
         description = "Account of Alice at Bank"
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
-        observers = []
+        observers = [agent_charlie]
     -- allocate funds to Alice
-    aliceRequestCid <- submit borrower_alice do
+    aliceRequestCid2 <- submit borrower_alice do
       createCmd CreditAccount.Request with
         account = aliceAccount
         instrument = usdInstrument
         amount = 250_684.9315
 
-    aliceCashHoldingCid <- submit fed do exerciseCmd aliceRequestCid CreditAccount.Accept
+    aliceCashHoldingCid <- submit fed do exerciseCmd aliceRequestCid2 CreditAccount.Accept
 
     -- Alices's bond account (request)
     aliceBondAccountRequestCid <- submit borrower_alice do
@@ -255,7 +255,7 @@ preOrigination LedgerParties{..} = do
           description = "Account for Alice's holding of Alice's Bond"
           accountFactoryCid = accountFactoryCid
           holdingFactoryCid = holdingFactoryCid
-          observers = []
+          observers = [agent_charlie]
 
     -- ...for Charlie's agency
     charlieRequestCid <- submit agent_charlie do
@@ -287,7 +287,7 @@ preOrigination LedgerParties{..} = do
           description = "Account for Charlie's holding of Alice's Bond at Bank"
           accountFactoryCid = accountFactoryCid
           holdingFactoryCid = holdingFactoryCid
-          observers = [borrower_alice]
+          observers = [agent_charlie]
 
     -- ...for Debbie's agency
     debbieRequestCid <- submit agent_debbie do
@@ -625,8 +625,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         approval = TakeDelivery approvingPartyAccount
 
   -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
-  -- TODO: Do this without submitMulti
-  settlementBases <- submitMulti [agent_charlie, borrower_alice] [] do
+  settlementBases <- submit agent_charlie do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
   -- Pick out each party's holdings from the list of returned contract id's
