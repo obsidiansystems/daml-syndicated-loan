@@ -1,0 +1,46 @@
+-- | Converting datatypes into human readable output
+module Util.Display where
+
+import Daml.Script
+import qualified DA.Text as T
+import qualified DA.Set as Set
+import qualified Daml.Finance.Settlement.Batch as Batch
+import qualified Daml.Finance.Interface.Settlement.Types as Settlement
+
+-- | Converts a datatype into a human-readable string. Emphasis should be placed
+-- on readability, so instances will often produce multiline strings.
+class Display a where
+  display : a -> Text
+
+-- | Logs a displayable datatype during execution of a daml script.
+log : Display a => a -> Script ()
+log = debugRaw . ("\n"<>). display -- We use debugRaw to ensure newlines cause line breaks
+
+-- | Log a displayable datatype with a fallback
+logSome : Display a => Text -> Optional a -> Script ()
+logSome fallback = log . optional fallback display
+
+instance Display Batch.Batch where
+ display b = T.intercalate "\n" $ 
+    [ "Batch: " <> show b.id <> " " <> b.description
+    , "> Requestors: " <> show (Set.toList  b.requestors)
+    , "> Settlers: " <> show (Set.toList b.settlers)
+    , "> Settlement time: " <> optional "N/A" show b.settlementTime 
+    , "> Routed steps: " <> show (length b.routedStepsWithInstructionId)
+    ] <> map (display . fst) b.routedStepsWithInstructionId
+
+instance Display Text where
+  display = identity
+
+instance Display Settlement.RoutedStep where
+  display r = T.intercalate " "
+    [ ">>"
+    , show r.sender
+    , "->"
+    , show r.receiver
+    , "-"
+    , show r.quantity.amount
+    , show r.quantity.unit.id
+    , "v" <> T.take 4 r.quantity.unit.version
+    , "(Cust. " <> show r.custodian <> ")"
+    ]

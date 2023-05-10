@@ -1,45 +1,36 @@
 module Scripts.Settlement where
 
 import Daml.Script
-import qualified DA.Text as T
-
-import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
-import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
 
 import DA.Date (toDateUTC, Month(..), date, toGregorian)
+import qualified DA.Map as Map
+import qualified DA.Set as Set
+import DA.Time (time)
+
+import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule (Rule(..))
+import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
+import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I(..), ClaimEffect(..))
+import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle (Lifecycle, Evolve(..))
+import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F(..))
+import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (Allocate(..), Approve(..))
+import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider (I(..))
+import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
+import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
 import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
 import Daml.Finance.Interface.Types.Date.RollConvention (Period(..), PeriodEnum(..), RollConventionEnum(..))
-import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
 import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..))
-
-import Workflow.Servicing (clockUpdateEvent)
-import qualified DA.Set as Set
-import Daml.Finance.Lifecycle.Rule.Claim as Claim
-import Daml.Finance.Interface.Lifecycle.Rule.Claim as ClaimI
---import Daml.Finance.Claims.Lifecycle.Rule as Lifecycle (Rule(..))
-import qualified Daml.Finance.Interface.Lifecycle.Rule.Lifecycle as Lifecycle
-import qualified Daml.Finance.Interface.Claims.Claim as C
-import qualified DA.Map as Map
-import DA.Time (days, time)
-import Workflow.Util
-import qualified Daml.Finance.Claims.Lifecycle.Rule as LifecycleRule
+import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
+import Daml.Finance.Lifecycle.Rule.Claim as Claim (Rule(..))
+import Daml.Finance.Settlement.Batch qualified as B
+import Daml.Finance.Settlement.Factory (observers, provider, Factory(Factory))
+import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
+import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 
 import Tests.Common
 import Tests.IDE
-import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
-import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as SingleCustodian
-import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
-import Daml.Finance.Settlement.Factory (observers, provider, Factory(Factory))
-import Daml.Finance.Interface.Lifecycle.Effect (Effect)
-import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle (Evolve(Evolve))
-import qualified Daml.Finance.Interface.Settlement.Batch as Batch
-
-import qualified Daml.Finance.Settlement.Batch as B
-import DA.Foldable (forA_)
-import qualified Daml.Finance.Interface.Settlement.Instruction as Instruction
-import Daml.Finance.Interface.Settlement.Types (Allocation (..), Approval (..))
-import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
-import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
+import Util.Display
+import Workflow.Servicing (clockUpdateEvent)
 
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
@@ -138,11 +129,11 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
         paths = Map.fromList
           [ ("LoanInstrument", Hierarchy with
               rootCustodian = borrower
-              pathsToRootCustodian = [[lender_gary, borrower_alice]]
+              pathsToRootCustodian = [[lender_gary]]
             )
           , ("USD", Hierarchy with
               rootCustodian = fed_ingrid
-              pathsToRootCustodian = [[borrower_alice, fed_ingrid], [lender_gary, fed_ingrid]]
+              pathsToRootCustodian = [[borrower_alice], [lender_gary]]
             )
           ]
 
@@ -156,9 +147,6 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
   orig <- origination (LedgerParties{..}) (PreOriginationStuff{..})
   now <- getTime
 
-  result <- submit agent_charlie $ exerciseCmd (toInterfaceContractId @C.Claim orig.bond.cid) C.GetClaims with actor = agent_charlie
-  debug $ show result
-
   let (y',m',d') = toGregorian (toDateUTC now)
       today = date (y'+1) m' d'
       parties = Set.fromList [borrower, lender, agent]
@@ -169,16 +157,12 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
   lifecycleRule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
     submitMulti [agent, borrower] [] $ createCmd $ LifecycleRule.Rule with
       providers = Set.fromList [borrower]
-      observers = Map.fromList
-        [ ("borrower", Set.singleton borrower)
-        , ("lender", Set.singleton lender)
-        , ("agent", Set.singleton agent)
-        ]
+      observers = Map.empty
       lifecycler = agent
       id = Id "LifecycleRule"
       description = "Rule to lifecycle the bond instrument"
 
-  claimRule <- fmap (toInterfaceContractId @ClaimI.I) $
+  claimRule <- fmap (toInterfaceContractId @Claim.I) $
     submit borrower_alice $ createCmd $ Claim.Rule with
       providers = Set.fromList [borrower]
       claimers = Set.singleton lender
@@ -194,7 +178,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       observableCids = []
 
   claimResult <- submitMulti [agent, borrower, lender] [] $
-    exerciseCmd claimRule ClaimI.ClaimEffect with
+    exerciseCmd claimRule Claim.ClaimEffect with
       claimer = lender
       holdingCids = [orig.garyBondHoldingKey]
       effectCid
@@ -225,27 +209,10 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
     approval = TakeDelivery ledgerAccounts.garyAccount
 
   batch <- queryContractId borrower_alice $ fromInterfaceContractId @B.Batch claimResult.batchCid
-  case batch of
-    None -> debug $ "No batch found for: " <> show claimResult.batchCid
-    Some b -> displayBatch b
+  logSome ("No batch found for: " <> show claimResult.batchCid) batch
 
   submitMulti [borrower_alice, agent_charlie] [] do
     exerciseCmd claimResult.batchCid Batch.Settle with
       actors = Set.fromList [borrower_alice, agent_charlie]
 
-  {-
-  case newBondOpt of
-    None -> debug "NO NEW STUFF"
-    Some b -> debug $ show b
-  -}
   return ()
-
-displayBatch : B.Batch -> Script ()
-displayBatch b = do
-  debug $ b.description <> " " <> show b.id
-  debug $ "> Requestors: " <> show (Set.toList  b.requestors)
-  debug $ "> Settlers: " <> show (Set.toList b.settlers)
-  debug $ "> Settlement time: " <> (case b.settlementTime of None -> "N/A"; Some a -> show a)
-  debug $ "> Routed steps: " <> show (length b.routedStepsWithInstructionId)
-  forA_ b.routedStepsWithInstructionId $ \(r, x) -> do
-    debug $ ">> " <> show r.sender <> " -> "  <> show r.receiver <> " (" <> show r.quantity.amount <> " " <> show r.quantity.unit.id <> " v" <> T.take 4 r.quantity.unit.version <> ") custodian " <> show r.custodian
