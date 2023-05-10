@@ -150,6 +150,7 @@ data PreOriginationStuff = PreOriginationStuff with
   ledgerAccounts : LedgerAccounts
   hortenseCashHoldingCid : ContractId B.I
   garyCashHoldingCid : ContractId B.I
+  aliceCashHoldingCid : ContractId B.I
 
 -- | Only a subset of the parties involved need to have accounts
 -- to exercise the lifecycle of the loan.
@@ -257,7 +258,7 @@ preOrigination LedgerParties{..} = do
       createCmd CreditAccount.Request with
         account = aliceAccount
         instrument = usdInstrument
-        amount = 2_000_000.00
+        amount = 501_369.863
 
     aliceCashHoldingCid <- submit fed_ingrid do exerciseCmd aliceRequestCid CreditAccount.Accept
 
@@ -292,6 +293,7 @@ preOrigination LedgerParties{..} = do
       ledgerAccounts
       hortenseCashHoldingCid
       garyCashHoldingCid
+      aliceCashHoldingCid
 
 data Origination = Origination with
   loanAgreement : LoanAgreement

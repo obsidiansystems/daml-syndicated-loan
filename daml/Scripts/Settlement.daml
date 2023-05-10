@@ -38,6 +38,8 @@ import qualified Daml.Finance.Settlement.Batch as B
 import DA.Foldable (forA_)
 import qualified Daml.Finance.Interface.Settlement.Instruction as Instruction
 import Daml.Finance.Interface.Settlement.Types (Allocation (..), Approval (..))
+import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
+import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
 
 -- | Helper container used to transfer state from one script to another.
 data SettlementState = SettlementState
@@ -130,10 +132,19 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
   -}
   -- 1. Create Route Provider
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit borrower do
-      createCmd SingleCustodian.SingleCustodian with
+      createCmd IntermediatedStatic with
         provider = borrower
         observers = Set.fromList [borrower, lender]
-        custodian = borrower
+        paths = Map.fromList
+          [ ("LoanInstrument", Hierarchy with
+              rootCustodian = borrower
+              pathsToRootCustodian = [[lender_gary, borrower_alice]]
+            )
+          , ("USD", Hierarchy with
+              rootCustodian = fed_ingrid
+              pathsToRootCustodian = [[borrower_alice, fed_ingrid], [lender_gary, fed_ingrid]]
+            )
+          ]
 
   -- 2. Create Settlement Factory
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit borrower do
@@ -206,8 +217,10 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
     actors = Set.fromList [lender]
     approval = TakeDelivery orig.garyBondAccountKey
 
-  --TODO: Alice pledges holding; Gary approves the transfer to him
-  submit lender $ exerciseCmd couponProduced Instruction.Approve with
+  (couponProduced2, _) <- submit borrower $ exerciseCmd couponProduced Instruction.Allocate with
+    actors = Set.fromList [borrower]
+    allocation = Pledge aliceCashHoldingCid
+  submit lender $ exerciseCmd couponProduced2 Instruction.Approve with
     actors = Set.fromList [lender]
     approval = TakeDelivery ledgerAccounts.garyAccount
 
@@ -216,9 +229,9 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
     None -> debug $ "No batch found for: " <> show claimResult.batchCid
     Some b -> displayBatch b
 
-  -- submitMulti [agent_charlie, borrower_alice] [] do
-  --   exerciseCmd claimResult.batchCid Batch.Settle with
-  --     actors = Set.fromList [borrower_alice, agent_charlie]
+  submitMulti [borrower_alice, agent_charlie] [] do
+    exerciseCmd claimResult.batchCid Batch.Settle with
+      actors = Set.fromList [borrower_alice, agent_charlie]
 
   {-
   case newBondOpt of
@@ -235,4 +248,4 @@ displayBatch b = do
   debug $ "> Settlement time: " <> (case b.settlementTime of None -> "N/A"; Some a -> show a)
   debug $ "> Routed steps: " <> show (length b.routedStepsWithInstructionId)
   forA_ b.routedStepsWithInstructionId $ \(r, x) -> do
-    debug $ ">> " <> show r.sender <> " -> "  <> show r.receiver <> " (" <> show r.quantity.amount <> " " <> show r.quantity.unit.id <> " v" <> T.take 4 r.quantity.unit.version <> ")"
+    debug $ ">> " <> show r.sender <> " -> "  <> show r.receiver <> " (" <> show r.quantity.amount <> " " <> show r.quantity.unit.id <> " v" <> T.take 4 r.quantity.unit.version <> ") custodian " <> show r.custodian
