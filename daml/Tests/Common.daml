@@ -150,6 +150,8 @@ data PreOriginationStuff = PreOriginationStuff with
   ledgerAccounts : LedgerAccounts
   hortenseCashHoldingCid : ContractId B.I
   garyCashHoldingCid : ContractId B.I
+  aliceCashHoldingCid : ContractId B.I
+  charlieCashHoldingCid : ContractId B.I
 
 -- | Only a subset of the parties involved need to have accounts
 -- to exercise the lifecycle of the loan.
@@ -253,6 +255,14 @@ preOrigination LedgerParties{..} = do
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
         observers = []
+    -- allocate funds to Alice
+    aliceRequestCid <- submit borrower_alice do
+      createCmd CreditAccount.Request with
+        account = aliceAccount
+        instrument = usdInstrument
+        amount = 2_000.00
+
+    aliceCashHoldingCid <- submit fed_ingrid do exerciseCmd aliceRequestCid CreditAccount.Accept
 
     -- ...for Charlie's agency
     charlieRequestCid <- submit agent_charlie do
@@ -264,6 +274,14 @@ preOrigination LedgerParties{..} = do
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
         observers = []
+    -- allocate funds to Charlie
+    charlieRequestCid <- submit agent_charlie do
+      createCmd CreditAccount.Request with
+        account = charlieAccount
+        instrument = usdInstrument
+        amount = 6_000_000_000.00
+
+    charlieCashHoldingCid <- submit fed_ingrid do exerciseCmd charlieRequestCid CreditAccount.Accept
 
     -- ...for Debbie's agency
     debbieRequestCid <- submit agent_debbie do
@@ -284,6 +302,8 @@ preOrigination LedgerParties{..} = do
       ledgerAccounts
       hortenseCashHoldingCid
       garyCashHoldingCid
+      aliceCashHoldingCid
+      charlieCashHoldingCid
 
 data Origination = Origination with
   loanAgreement : LoanAgreement
@@ -357,14 +377,14 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
         holdingFactoryCid = holdingFactoryCid
         observers = []
 
-  aliceBondRequestCid <- submit borrower_alice do
+  charlieBondRequestCid <- submit agent_charlie do
     createCmd CreditAccount.Request with
-      account = ledgerAccounts.aliceAccount
+      account = ledgerAccounts.charlieAccount
       instrument = bond.reference
       amount = loanAgreement.loanTerms.amount
 
-  aliceBondHoldingKey <- submit fed_ingrid do
-    exerciseCmd aliceBondRequestCid CreditAccount.Accept
+  charlieBondHoldingKey <- submit fed_ingrid do
+    exerciseCmd charlieBondRequestCid CreditAccount.Accept
 
   garyAccountRequestCid <- submit lender_gary do
     createCmd CreateAccount.Request with
@@ -377,18 +397,18 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
         description = "Account for Gary's holding of Alice's Bond at Bank"
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
-        observers = [borrower_alice]
+        observers = [agent_charlie]
 
   bondTransferReq <- submit lender_gary do
     createCmd Transfer.Request with
       receiverAccount = garyBondAccountKey
       instrument = bond.reference
       amount = loanAgreement.loanTerms.amount
-      currentOwner = borrower_alice
+      currentOwner = agent_charlie
 
-  garyBondHoldingKey <- submit borrower_alice do
+  garyBondHoldingKey <- submit agent_charlie do
     exerciseCmd bondTransferReq Transfer.Accept with
-      holdingCid = aliceBondHoldingKey
+      holdingCid = charlieBondHoldingKey
 
   pure Origination with
     loanAgreement
@@ -534,7 +554,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       observers = S.fromList [borrower_bob, borrower_alice]
 
   -- Generate Settlement Proposal
-  settlementProposalCid <- submit borrower_alice do
+  settlementProposalCid <- submit agent_charlie do
     createCmd SettlementProposal with
       loan = origination.loanAgreement
       sigAccumulator = []
@@ -543,15 +563,15 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       bond = origination.bond.reference
 
   -- Create a bond holding request
-  aliceBondRequestCid <- submit borrower_alice do
+  charlieBondRequestCid <- submit agent_charlie do
     createCmd CreditAccount.Request with
-      account = preOriginationStuff.ledgerAccounts.aliceAccount
+      account = preOriginationStuff.ledgerAccounts.charlieAccount
       instrument = origination.bond.reference
       amount = origination.loanAgreement.loanTerms.amount
 
   -- Create a bond holding held by Alice
-  aliceBondHoldingKey <- submit fed_ingrid do
-    exerciseCmd aliceBondRequestCid CreditAccount.Accept
+  charlieBondHoldingKey <- submit fed_ingrid do
+    exerciseCmd charlieBondRequestCid CreditAccount.Accept
 
   -- Get sig of participating lender
   Left settlementProposalCid2 <- submit lender_hortense do
@@ -593,9 +613,11 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   let partyHoldingsMap = Map.fromList
         [ (lender_gary, Some preOriginationStuff.garyCashHoldingCid)
         , (lender_hortense, Some preOriginationStuff.hortenseCashHoldingCid)
-        , (borrower_alice, Some aliceBondHoldingKey)
+        , (agent_charlie, Some preOriginationStuff.charlieCashHoldingCid)
+        , (borrower_alice, Some preOriginationStuff.aliceCashHoldingCid)
         ]
 
+  -- TODO: allow charlie to delegate on Alice's account
   let f (accum, map') (icid, routedStep) = do
         let key' = routedStep.sender
             optionalReceiverHoldingCid = Map.lookup key' map'
