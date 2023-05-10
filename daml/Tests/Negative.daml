@@ -3,70 +3,9 @@ module Tests.Negative where
 import Daml.Script
 
 import DA.Foldable
-import DA.Map qualified as Map
-import DA.Set qualified as Set
-
-import Daml.Finance.Account.Account qualified as Account (Factory(..))
-import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
-
-import Daml.Finance.Interface.Types.Common.Types
-import Daml.Finance.Interface.Account.Factory qualified as Account (F)
-import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
-
-import Workflow.CreateAccount qualified as CreateAccount
-import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 
 import Tests.Common(LedgerParties(..), PreOriginationStuff(..))
-
-preoriginationTests : LedgerParties -> Script ()
-preoriginationTests LedgerParties{..} = do
-    let usdInstrument = InstrumentKey with
-            issuer = fed_ingrid
-            depository = fed_ingrid
-            id = Id "USD"
-            version = "0"
-        falseInstrument = InstrumentKey with
-            issuer = borrower_bob
-            depository = borrower_bob
-            id = Id "USD"
-            version = "0"
-
-    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed_ingrid do
-        createCmd Account.Factory
-          with
-            provider = fed_ingrid
-            observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $ 
-                [borrower_alice, borrower_bob]
-
-    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
-        createCmd Fungible.Factory with
-            provider = fed_ingrid
-            observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $ 
-                [borrower_alice, borrower_bob]
-
-    -- Infuse the lenders with capital
-    -- ...for Hortenses's Bank
-    hortenseRequestCid <- submit lender_hortense do
-      createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
-
-    hortenseAccount <- submit fed_ingrid do
-      exerciseCmd hortenseRequestCid CreateAccount.Accept with
-        label = "Hortense@Bank"
-        description = "Account of Hortense at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid
-        observers = []
-
-    hortenseRequestCid <- submit lender_hortense do
-      createCmd CreditAccount.Request with
-        account = hortenseAccount
-        instrument = usdInstrument
-        amount = 100_000_000.00
-
-    hortenseCashHoldingCid <- submit fed_ingrid do exerciseCmd hortenseRequestCid CreditAccount.Accept
-
-    pure ()
 
 originationTests : LedgerParties -> PreOriginationStuff -> Script ()
 originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
@@ -82,6 +21,7 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
             agent = agent_charlie
             applicationData = aliceApplicationData
 
+{-
         bobApplicationData = LoanApplicationData with
           instrument = usdInstrument
           amount = 98_765_432.00
@@ -98,6 +38,7 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
             borrower = borrower_bob
             agent = agent_debbie
             applicationData = bobApplicationData
+-}
 
     -- Workflow for Alice to submit a loan
     -- Bob cannot submit an application for Alice
@@ -139,18 +80,54 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- Note that they are the only one with the authority to exercise this choice.
     aliceUnderwritingCid <- testExercise ps underwriter_emma aliceUnderwritingRequestCid CreateUnderwritingResult with
       result = True
-    -- Once the underwriting is complete, the original request has been archived
-    testVisibility ps [] aliceUnderwritingRequestCid
     -- The report is only visible to the underwriter and the agent who requested it
     testVisibility ps [ agent_charlie, underwriter_emma ] aliceUnderwritingCid
 
     -- With the report in hand, Charlie is prepared to make an offer to Alice.
     --
-    -- NOTE: This emits a divulgence warning just as above. However, Alice can only seen the application process contract,
+    -- NOTE: This emits a divulgence warning just as above. However, Alice can only see the application process contract,
     -- not anything underlying the underwriting process.
     aliceMandateLetterOfferCid <- testExercise ps agent_charlie aliceApplicationProcessCid LoanApplicationProcess_OfferMandateLetter with
         reportCid = aliceUnderwritingCid
+    testVisibility ps [ borrower_alice, agent_charlie ] aliceMandateLetterOfferCid
 
+    -- Alice accepts the offer
+    aliceMandateLetterCid <- testExercise ps borrower_alice aliceMandateLetterOfferCid MandateLetterOffer_Accept
+    testVisibility ps [ borrower_alice, agent_charlie ] aliceMandateLetterCid
+
+    -- With the consent of the borrower in hand, Charlie can disclose the underwriting report to the lenders,
+    -- and request funding based on the report.
+    let prospectiveLenders = [ lender_gary, lender_hortense ]
+    fundingRequests <- forA prospectiveLenders $ \lender -> do
+        disclosedUnderwritingReportCid <- testExercise ps agent_charlie aliceUnderwritingCid UnderwritingResult_Disclose with
+            disclose_to = lender
+            mandateLetterCid = aliceMandateLetterCid
+        -- only charlie and this specific lender can see this disclosure
+        testVisibility ps [lender, agent_charlie] disclosedUnderwritingReportCid
+
+        -- The disclosure allows charlie to make a funding request without the underwriter knowing who the prospective
+        -- lender is.
+        -- NOTE: Nevertheless, this emits divulgence warnings, as the underwriter is aware of the disclosure.
+        -- We could rearrange the workflow so as to prevent the underwriter from seeing even that, if desired.
+        fundingRequestCid <- testExercise ps agent_charlie disclosedUnderwritingReportCid MakeFundingRequest with
+            requestee = lender
+        -- only charlie and this specific lender can see this request
+        testVisibility ps [lender, agent_charlie] fundingRequestCid
+
+        pure (lender, fundingRequestCid)
+
+    -- The lenders now consider their respective requests, and make commitments about how much they are willing to lend
+    -- Here we will contrive some differing offers.
+    forA_ fundingRequests $ \(lender, requestCid) -> do
+        Some request <- queryContractId lender requestCid
+        let RatePerAnnum maxRate = request.report.maxInterestRate
+            (amount, rate)
+                | lender == lender_gary = (request.totalApplicationAmount / 3.0 + 1.0, RatePerAnnum (maxRate - 0.005))
+                | lender == lender_hortense = (request.totalApplicationAmount / 1.5 + 1.0, RatePerAnnum maxRate)
+                | otherwise = (request.totalApplicationAmount, RatePerAnnum maxRate)
+        testExercise ps lender requestCid FundingRequest_Respond with
+            amount
+            rate
     pure ()
 
 
