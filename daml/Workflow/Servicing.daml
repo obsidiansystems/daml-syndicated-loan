@@ -1,15 +1,19 @@
-module Workflow.Servicing where
+module Workflow.Servicing
+  ( clockUpdateEvent
+  )
+  where
 
 import DA.Set qualified as Set
 import DA.Map qualified as Map
+
 import Daml.Finance.Claims.Lifecycle.Rule qualified as Lifecycle (Rule(..))
-import Daml.Finance.Interface.Types.Common.Types (InstrumentKey, Id(..), Parties)
 import Daml.Finance.Data.Time.DateClock (DateClock(..))
-import Daml.Finance.Data.Time.DateClockUpdate (DateClockUpdateEvent(..))
 import Daml.Finance.Data.Time.DateClock.Types (Unit(..))
-import Daml.Finance.Interface.Types.Date.Classes (toUTCTime)
-import qualified Daml.Finance.Interface.Lifecycle.Rule.Lifecycle as Lifecycle
+import Daml.Finance.Data.Time.DateClockUpdate (DateClockUpdateEvent(..))
 import Daml.Finance.Interface.Lifecycle.Effect (Effect)
+import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle
+import Daml.Finance.Interface.Types.Common.Types (InstrumentKey, Id(..), Parties)
+import Daml.Finance.Interface.Types.Date.Classes (toUTCTime)
 
 -- | Given a `Date`, it creates a `DateClockUpdateEvent`.
 clockUpdateEvent : Parties -> Parties -> Date -> DateClockUpdateEvent
