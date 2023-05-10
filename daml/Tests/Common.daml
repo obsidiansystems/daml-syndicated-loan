@@ -28,6 +28,7 @@ import Daml.Finance.Interface.Lifecycle.Rule.Claim as ClaimI
 import Daml.Finance.Interface.Types.Common.Types
 import Daml.Finance.Lifecycle.Rule.Claim as Claim
 import Daml.Finance.Settlement.Factory (Factory(..))
+import qualified Daml.Finance.Settlement.Instruction
 import qualified Daml.Finance.Holding.Fungible as FungibleX
 import qualified Daml.Finance.Holding.Fungible as FungibleX
 import qualified Daml.Finance.Interface.Holding.Base as B
@@ -243,6 +244,7 @@ data LedgerAccounts = LedgerAccounts with
     garyAccount : AccountKey -- Cash account
     garyBondAccount : AccountKey
     hortenseAccount : AccountKey
+    hortenseBondAccount : AccountKey
   deriving (Show, Eq, Ord)
 
 -- Pre-origination set-up script that creates:
@@ -298,6 +300,20 @@ preOrigination LedgerParties{..} = do
 
     hortenseCashHoldingCid <- submit fed_ingrid do exerciseCmd hortenseRequestCid CreditAccount.Accept
 
+    -- Hortense's bond account (request)
+    hortenseBondAccountRequestCid <- submit lender_hortense do
+      createCmd CreateAccount.Request with
+        custodian = borrower_alice
+        owner = lender_hortense
+    -- Hortense's bond account (accept)
+    hortenseBondAccount <- submit borrower_alice do
+      exerciseCmd hortenseBondAccountRequestCid CreateAccount.Accept with
+          label = "HortenseBond@Bank"
+          description = "Account for Hortense's holding of Alice's Bond at Bank"
+          accountFactoryCid = accountFactoryCid
+          holdingFactoryCid = holdingFactoryCid
+          observers = [borrower_alice]
+
     -- ...for Gary's Bank
     garyRequestCid <- submit lender_gary do
       createCmd CreateAccount.Request with owner = lender_gary; custodian = fed_ingrid
@@ -321,7 +337,6 @@ preOrigination LedgerParties{..} = do
       createCmd CreateAccount.Request with
         custodian = borrower_alice
         owner = lender_gary
-
     -- Gary's bond account (accept)
     garyBondAccount <- submit borrower_alice do
       exerciseCmd garyBondAccountRequestCid CreateAccount.Accept with
@@ -367,7 +382,6 @@ preOrigination LedgerParties{..} = do
       createCmd CreateAccount.Request with
         custodian = borrower_alice
         owner = borrower_alice
-
     -- Alices's bond account (accept)
     aliceBondAccount <- submit borrower_alice do
       exerciseCmd aliceBondAccountRequestCid CreateAccount.Accept with
@@ -669,16 +683,19 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
     pure (icid, iv)
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
+  let bondCurrency = origination.bond.instrument.currency
+      bondKey = origination.bond.reference
   -- initiate Map Party (ContractId Holding)
-  let partyHoldingsMap = Map.fromList
-        [ (lender_gary, Some preOriginationStuff.garyCashHoldingCid)
-        , (lender_hortense, Some preOriginationStuff.hortenseCashHoldingCid)
-        , (borrower_alice, Some aliceBondHoldingKey)
+  let partyHoldingsMap : Map (Party, InstrumentKey) (Optional (ContractId Base))
+      partyHoldingsMap = Map.fromList
+        [ ((lender_gary, bondCurrency), Some preOriginationStuff.garyCashHoldingCid)
+        , ((lender_hortense, bondCurrency), Some preOriginationStuff.hortenseCashHoldingCid)
+        , ((borrower_alice, bondKey), Some aliceBondHoldingKey)
         ]
 
   let f (accum, map') (icid, routedStep) = do
         let key' = routedStep.sender
-            optionalReceiverHoldingCid = Map.lookup key' map'
+            optionalReceiverHoldingCid = Map.lookup (key', routedStep.quantity.unit) map'
         debug $ "allocatedSettleInstructions: " <> show key'
         case optionalReceiverHoldingCid  of
           None -> fail $ "Could not find Holding for " <> show key'
@@ -691,7 +708,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
             debug $ "rest: " <> show rest
             assertMsg "we only split a single amount" $ Prelude.length splitCids == 1
             let Some splitCid = DA.List.Total.head splitCids
-                newMap = Map.insert key' (coerceInterfaceContractId @B.Base <$> rest) map'
+                newMap = Map.insert (key', routedStep.quantity.unit) (coerceInterfaceContractId @B.Base <$> rest) map'
 
             debugRaw $ "allocatedSettleInstructions: sender: " <> show key' <> " " <> show splitCid
             allocInstructions <- submit key' do
@@ -705,20 +722,30 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
   -- initiate Map Party AccountKey
   let partyAccountMap = Map.fromList
-        [ (borrower_alice, preOriginationStuff.ledgerAccounts.aliceBondAccount)
-        , (borrower_bob, preOriginationStuff.ledgerAccounts.bobAccount)
-        , (lender_gary, preOriginationStuff.ledgerAccounts.garyAccount)
-        , (lender_hortense, preOriginationStuff.ledgerAccounts.hortenseAccount)
-        , (agent_charlie, preOriginationStuff.ledgerAccounts.charlieAccount)
-        , (agent_debbie, preOriginationStuff.ledgerAccounts.debbieAccount)
+        [ ((borrower_alice, bondKey), preOriginationStuff.ledgerAccounts.aliceBondAccount)
+        , ((borrower_alice, bondCurrency), preOriginationStuff.ledgerAccounts.aliceAccount)
+
+        , ((borrower_bob, bondCurrency), preOriginationStuff.ledgerAccounts.bobAccount)
+
+        , ((lender_gary, bondKey), preOriginationStuff.ledgerAccounts.garyBondAccount)
+        , ((lender_gary, bondCurrency), preOriginationStuff.ledgerAccounts.garyAccount)
+
+        , ((lender_hortense, bondKey), preOriginationStuff.ledgerAccounts.hortenseBondAccount)
+        , ((lender_hortense, bondCurrency), preOriginationStuff.ledgerAccounts.hortenseAccount)
+
+        , ((agent_charlie, bondCurrency), preOriginationStuff.ledgerAccounts.charlieAccount)
+
+        , ((agent_debbie, bondCurrency), preOriginationStuff.ledgerAccounts.debbieAccount)
         ]
 
   -- Have each party approve of transaction instructions
   approvedSettleInstuctionCids <- forA allocatedSettleInstructions $ \(approvingParty, (allocInstructionsCid, _)) -> do
-    -- Some allocInstructions <- queryContractId approvingParty allocInstructionsCid
-    debugRaw $ "approvedSettleInstuctionCids: " <> show (approvingParty, allocInstructionsCid)
+    Some allocInstructions <- queryContractId
+      @Daml.Finance.Settlement.Instruction.Instruction
+      approvingParty
+      (fromInterfaceContractId allocInstructionsCid)
     submit approvingParty do
-      let Some approvingPartyAccount = Map.lookup approvingParty partyAccountMap
+      let Some approvingPartyAccount = Map.lookup (approvingParty, allocInstructions.routedStep.quantity.unit) partyAccountMap
       exerciseCmd allocInstructionsCid Instruction.Approve with
         actors = S.singleton approvingParty
         approval = TakeDelivery approvingPartyAccount
@@ -737,6 +764,8 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
   let settlementFungibleMap : Map.Map Party [(ContractId FungibleX.Fungible, FungibleX.Fungible)] -- Owner to fungibles
       settlementFungibleMap = createFungiblesMap fungibles
+
+  debugRaw $ "settlementFungibleMap: " <> show settlementFungibleMap
 
   borrowerAliceUsdHolding' : NonEmpty (ContractId FungibleX.Fungible, FungibleX.Fungible) <- lookupNonEmptyUsdHoldings borrower_alice settlementFungibleMap
   lenderGaryBondHolding' : (ContractId FungibleX.Fungible, FungibleX.Fungible) <- lookupSingleBondHolding lender_gary settlementFungibleMap
@@ -781,7 +810,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
           (\nonEmptyBondsList ->
             if Prelude.length (NE.toList nonEmptyBondsList) == 1
               then pure $ head $ NE.toList nonEmptyBondsList
-              else fail $ "Expected " <> show party <> " to hold exactly one Alice-bond"
+              else fail $ "Expected " <> show party <> " to hold exactly one Alice-bond. Found: " <> show (NE.toList nonEmptyBondsList)
           )
           (NE.nonEmpty $ filter ((== origination.bond.reference) . (.instrument) . snd) values)
       )
