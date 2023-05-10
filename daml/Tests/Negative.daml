@@ -3,6 +3,7 @@ module Tests.Negative where
 import Daml.Script
 
 import DA.Foldable
+import DA.Set qualified as Set
 import Workflow.Origination
 
 import Tests.Common(LedgerParties(..), PreOriginationStuff(..))
@@ -133,8 +134,7 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
 
 -- Explicitly deconstruct the ledger parties so that if it changes, we notice to include them
 partiesList : LedgerParties -> [Party]
-partiesList (LedgerParties a b c d e f g h i) =
-    [ a, b, c, d, e, f, g, h, i ]
+partiesList = Set.toList . allParties
 
 -- | Given a contract and a set of parties who should be able to view the contract,
 -- confirms that this is the case and moreover, the other parties of the test script
