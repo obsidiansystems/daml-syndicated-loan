@@ -1,7 +1,6 @@
 module Tests.Common
   ( LedgerParties(..)
   , PreOriginationStuff(..)
-  , makeUnderwritingRequest
   , initialTest
   , preOrigination
   , Origination(..)
