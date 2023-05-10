@@ -30,7 +30,6 @@ import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedS
 
 import Scripts.Parties
 import Tests.Common
-import Tests.IDE
 import Util.Display
 import Util.Script
 import Workflow.Servicing (clockUpdateEvent)
@@ -135,7 +134,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement
               pathsToRootCustodian = [[lender_gary]]
             )
           , ("USD", Hierarchy with
-              rootCustodian = fed_ingrid
+              rootCustodian = fed
               pathsToRootCustodian = [[borrower_alice], [lender_gary]]
             )
           ]
@@ -147,7 +146,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement
       observers = Set.fromList [borrower,lender]
 
   now <- getTime
-  result <- submit borrower_alice $ exerciseCmd (toInterfaceContractId @Claim.Claim orig.loanAgreement.bondCid) Claim.GetClaims with actor = borrower_alice
+  result <- submit borrower_alice $ exerciseCmd (coerceInterfaceContractId @Claim.Claim orig.loanAgreement.bondCid) Claim.GetClaims with actor = borrower_alice
   debug $ show result
 
   let (y',m',d') = toGregorian (toDateUTC now)
