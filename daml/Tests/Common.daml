@@ -95,7 +95,7 @@ data PreOriginationStuff = PreOriginationStuff with
 -- - the accounts for the agents, lenders, and borrowers
 -- - initial assets for the lenders
 preOrigination : LedgerParties -> Script PreOriginationStuff
-preOrigination LedgerParties{..} = do
+preOrigination parties@(LedgerParties{..}) = do
     -- Create the Fed
 
     -- Create USD
@@ -140,11 +140,11 @@ preOrigination LedgerParties{..} = do
         paths = Map.fromList
           [ ("LoanInstrument", Hierarchy with
               rootCustodian = borrower_alice
-              pathsToRootCustodian = fmap (::[]) (toList allParties)
+              pathsToRootCustodian = fmap (::[]) $ toList $ allParties parties
             )
           , ("USD", Hierarchy with
               rootCustodian = fed
-              pathsToRootCustodian = fmap (::[]) (toList allParties)
+              pathsToRootCustodian = fmap (::[]) $ toList $ allParties parties
             )
           ]
 
