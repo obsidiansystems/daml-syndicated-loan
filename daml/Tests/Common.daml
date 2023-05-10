@@ -55,6 +55,9 @@ import Workflow.SettlementProposal
 
 import Scripts.Parties
 import Scripts.Accounts
+import DA.Date (date, toGregorian, toDateUTC)
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
+import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
 
 -- | Test that does not exercise the lending workflow as such, but
 -- exercises transfers on the ledger to help us estimate throughput
@@ -297,9 +300,20 @@ data Origination = Origination with
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
+  now <- getTime
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
       uuid = "LoanInstrument"
+      startDate = toDateUTC now
+      (y,m,d) = toGregorian startDate
+
+      schedule = createPaymentPeriodicSchedule
+        (date (y+1) m d)
+        []
+        Following
+        Y 1
+        startDate
+        (date (y+10) m d)
       loanApplicationSubmission = LoanApplicationSubmission with
         borrower = borrower_alice
         agent = agent_charlie
@@ -309,6 +323,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
           maxInterestRate = rate
           prospectus = "To test the syndicated loans framework :)"
           durationYears = 10
+          schedule
   log loanApplicationSubmission
   -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplicationSubmission
@@ -477,6 +492,7 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
         uuid = acceptance.uuid
         prospectus = acceptance.mandateLetter.prospectus
         loanTerms = acceptance.terms
+        
   submit agent $ createCmd PendingLoanAgreement with
     agreement
     signed = []

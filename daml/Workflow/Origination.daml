@@ -29,12 +29,13 @@ module Workflow.Origination
   , UnderwritingRequest(..)
   , UnderwritingResult(..)
   , UnderwritingResult_Disclose(..)
+  , createPaymentPeriodicSchedule
   )
   where
 
 import Prelude hiding (agreement, key)
 
-import DA.Date (date, toGregorian, toDateUTC)
+import DA.Date (toGregorian)
 import DA.Map (Map)
 import DA.Map qualified as Map
 import DA.Set qualified as Set
@@ -50,10 +51,10 @@ import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle
 import Daml.Finance.Interface.Settlement.Factory qualified as Settlement
 import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
 import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
-import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..), BusinessDayConventionEnum(..))
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..))
 import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
 import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(..))
-import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(..), Period(..))
+import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum, RollConventionEnum(..), Period(..))
 import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), PeriodicSchedule(..))
 import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
 import Daml.Finance.Lifecycle.Rule.Claim qualified as Claim
@@ -87,9 +88,11 @@ data LoanApplicationData = LoanApplicationData
     -- ^ The loan term requested
     maxInterestRate : RatePerAnnum
     -- ^ The maximum interest rate desired
+    schedule : PeriodicSchedule
+    -- ^ The desired repayment coupon schedule
     prospectus : Text
     -- ^ An explanation, by the borrower, of what the loan will be used for
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Show)
 
 -- | An application for a loan by a borrower
 -- NOTE: Borrowers may create and freely submit loan applications to agents. We do
@@ -323,6 +326,7 @@ template AcceptedMandateLetter
         uuid : Text
       controller agent
       do
+        application <- fetch applicationCid
         create SyndicatedLoanOffer with
           borrower
           agent
@@ -333,6 +337,7 @@ template AcceptedMandateLetter
             amount = mandateLetter.amount
             rate
             durationYears = mandateLetter.durationYears
+            schedule = application.applicationData.schedule
 
 -- | This template represents a signed underwriting report that is being shared with a prospective lender.
 -- The agent cannot request funding from a lender without providing this information. It is a separate template
@@ -473,7 +478,9 @@ data LoanTerms = LoanTerms with
     rate : RatePerAnnum
     -- ^ The interest amount paid by the borrower yearly is (amount * rate).
     durationYears : Int
-    -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
+    -- ^ The number of years after which the principal amount must be returned to the lenders.
+    schedule : PeriodicSchedule
+    -- ^ Repayment coupon schedule
       deriving (Eq, Show)
 
 template AcceptedLoan
@@ -622,26 +629,13 @@ loanAgreementToBondCreate now usd a =
         version = "0"
       description = "Fixed-rate bond"
       couponRate = unRatePerAnnum a.loanTerms.rate
-      periodicSchedule = schedule
+      periodicSchedule = a.loanTerms.schedule
       holidayCalendarIds = [] -- NOT USED!
       calendarDataProvider = a.agent -- NOT USED!
       dayCountConvention = Act365Fixed -- TODO: how does this impact servicing rules?
       currency = usd
       lastEventTimestamp = now
     observers = Map.fromList [("lenders", Set.fromList (Map.keys a.participantsWithAmounts)), ("agent", Set.singleton a.agent)]
-  where
-    startDate = toDateUTC now
-
-    (y,m,d) = toGregorian startDate
-
-    schedule = createPaymentPeriodicSchedule
-      (date (y+1) m d)
-      []
-      Following
-      Y
-      1
-      startDate
-      (date (y+5) m d)
 
 -- | Create a schedule for periodic payments.
 createPaymentPeriodicSchedule : Date -> [Text] -> Cal.BusinessDayConventionEnum -> PeriodEnum ->
