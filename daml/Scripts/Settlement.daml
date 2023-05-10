@@ -8,9 +8,9 @@ import DA.Set qualified as Set
 import DA.Time (time)
 
 import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule
-import Daml.Finance.Interface.Claims.Claim qualified as C
+import Daml.Finance.Interface.Claims.Claim qualified as Claim (Claim(..), GetClaims(..))
 import Daml.Finance.Interface.Holding.Base qualified as Holding
-import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as ClaimI
+import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I(..), ClaimEffect(..))
 import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch
 import Daml.Finance.Interface.Settlement.Factory qualified as Settlement
@@ -146,7 +146,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
 
   orig <- origination (LedgerParties{..}) (PreOriginationStuff{..})
   now <- getTime
-  result <- submit borrower_alice $ exerciseCmd (toInterfaceContractId @C.Claim orig.loanAgreement.bondCid) C.GetClaims with actor = borrower_alice
+  result <- submit borrower_alice $ exerciseCmd (toInterfaceContractId @Claim.Claim orig.loanAgreement.bondCid) Claim.GetClaims with actor = borrower_alice
   debug $ show result
 
   let (y',m',d') = toGregorian (toDateUTC now)
@@ -164,7 +164,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       id = Id "LifecycleRule"
       description = "Rule to lifecycle the bond instrument"
 
-  claimRule <- fmap (toInterfaceContractId @ClaimI.I) $
+  claimRule <- fmap (toInterfaceContractId @Claim.I) $
     submit borrower_alice $ createCmd $ Claim.Rule with
       providers = Set.fromList [borrower]
       claimers = Set.singleton lender
@@ -180,7 +180,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       observableCids = []
 
   claimResult <- submit lender $
-    exerciseCmd claimRule ClaimI.ClaimEffect with
+    exerciseCmd claimRule Claim.ClaimEffect with
       claimer = lender
       holdingCids = [orig.garyBondHoldingKey]
       effectCid
