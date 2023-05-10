@@ -50,17 +50,17 @@ perfTest LedgerParties{..} = do
     let instrumentId = Id "USD"
         instrumentVersion = "0"
         usdInstrument = InstrumentKey with
-          issuer = fed_ingrid
-          depository = fed_ingrid
+          issuer = fed
+          depository = fed
           id = instrumentId
           version = instrumentVersion
 
-    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed_ingrid do
-      createCmd Account.Factory with provider = fed_ingrid; observers = Map.empty
+    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed do
+      createCmd Account.Factory with provider = fed; observers = Map.empty
 
-    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
+    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed do
       createCmd Fungible.Factory with
-        provider = fed_ingrid
+        provider = fed
         observers = Map.fromList [("Alice", Set.fromList [borrower_alice])]
 
     let config = Config with
@@ -75,7 +75,7 @@ perfTest LedgerParties{..} = do
     acchelper_hortense <- submit lender_hortense $
       createCmd Helper with
         p = lender_hortense
-        fed = fed_ingrid
+        fed = fed
 
     debug $ "Batch Transfer Request"
     batch_transfer_request <- submit lender_hortense $ do
@@ -111,9 +111,9 @@ splitEvents LedgerParties{..} ids = do
 createAccounts : LedgerParties -> (ContractId Account.F, ContractId Holding.F) -> Int -> Script [AccountKey]
 createAccounts LedgerParties{..} (accountFactoryCid, holdingFactoryCid) amount = do
     forA [1..amount] $ \x -> do
-      account <- submit lender_hortense $ createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
+      account <- submit lender_hortense $ createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed
       debug $ (show account)
-      submit fed_ingrid $ do
+      submit fed $ do
           exerciseCmd account CreateAccount.Accept with
             label = (show x)
             description = "null"
@@ -125,8 +125,8 @@ createAccounts LedgerParties{..} (accountFactoryCid, holdingFactoryCid) amount =
 setupBorrower : LedgerParties -> Config -> Int -> Script (SplitResult)
 setupBorrower LedgerParties{..} Config{..} amount = do
     aliceReq <- submit borrower_alice do
-      createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed_ingrid
-    aliceAccount <- submit fed_ingrid do
+      createCmd CreateAccount.Request with owner = borrower_alice; custodian = fed
+    aliceAccount <- submit fed do
       exerciseCmd aliceReq CreateAccount.Accept with
         label = "Alice@Fed"
         description = "null"
@@ -137,12 +137,12 @@ setupBorrower LedgerParties{..} Config{..} amount = do
         createCmd CreditAccount.Request with
           account = aliceAccount
           instrument = InstrumentKey with
-            issuer = fed_ingrid
-            depository = fed_ingrid
+            issuer = fed
+            depository = fed
             id = instrument.id
             version = instrument.version
           amount = 100000.0
-    xv <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
+    xv <- submit fed do exerciseCmd requestMon CreditAccount.Accept
     submit borrower_alice do
       exerciseCmd (coerceInterfaceContractId @Fungible xv) Fungible.Split with
         amounts = replicate amount 5.0
