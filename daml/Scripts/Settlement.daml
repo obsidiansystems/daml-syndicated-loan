@@ -30,7 +30,6 @@ import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedS
 
 import Scripts.Parties
 import Tests.Common
-import Tests.IDE
 import Util.Display
 import Util.Script
 import Workflow.Servicing (clockUpdateEvent)
@@ -135,7 +134,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement
               pathsToRootCustodian = [[lender_gary]]
             )
           , ("USD", Hierarchy with
-              rootCustodian = fed_ingrid
+              rootCustodian = fed
               pathsToRootCustodian = [[borrower_alice], [lender_gary]]
             )
           ]
