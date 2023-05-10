@@ -317,17 +317,16 @@ template AcceptedMandateLetter
     mandateLetter : MandateLetter
   where
     signatory agent, borrower
-    choice AcceptedMandateLetter_CreateOffer : ContractId SyndicatedLoanOffer
+    nonconsuming choice AcceptedMandateLetter_CreateOffer : ContractId SyndicatedLoanOffer
       with
         rate : RatePerAnnum
         uuid : Text
       controller agent
       do
         create SyndicatedLoanOffer with
-          borrower
-          agent
           uuid
-          mandateLetter
+          mandateLetterCid = self
+          mandateLetter = this
           terms = LoanTerms with
             instrument = mandateLetter.instrument
             amount = mandateLetter.amount
@@ -446,24 +445,24 @@ template FundingInterest
 
 template SyndicatedLoanOffer
   with
-    agent : Party
     uuid : Text
-    borrower : Party
-    mandateLetter : MandateLetter
+    mandateLetterCid : ContractId AcceptedMandateLetter
+    mandateLetter : AcceptedMandateLetter
     terms : LoanTerms
     --NOTE: Maybe a covenant, once agreed by the borrower, could actually grant access to some on-chain data in the future, which is necessary to enforce it. and this could also trigger on-chain modifications of the loan.
   where
-    signatory agent
-    observer borrower
-    key (agent, uuid) : (Party, Text)
+    signatory mandateLetter.agent
+    observer mandateLetter.borrower
+    key (mandateLetter.agent, uuid) : (Party, Text)
     maintainer key._1
     choice SyndicatedLoanOffer_Accept : ContractId AcceptedLoan
-      controller borrower
+      controller mandateLetter.borrower
       do
+        fetchedMandate <- fetch mandateLetterCid
+        assertMsg "Mandate letter must match referenced mandate letter" $ fetchedMandate == this.mandateLetter
         create AcceptedLoan with
-          agent
-          borrower
           uuid
+          mandateLetterCid
           mandateLetter
           terms
 
@@ -478,25 +477,23 @@ data LoanTerms = LoanTerms with
 
 template AcceptedLoan
   with
-    agent : Party
-    borrower : Party
     uuid : Text
-    mandateLetter : MandateLetter
+    mandateLetterCid : ContractId AcceptedMandateLetter
+    mandateLetter : AcceptedMandateLetter
     terms : LoanTerms
   where
-    signatory borrower
-    observer agent
+    signatory mandateLetter.borrower, mandateLetter.agent
     choice AcceptedLoan_SignAgreement : ContractId PendingLoanAgreement
       with
         agreementCid : ContractId PendingLoanAgreement
-      controller agent
+      controller mandateLetter.agent
       do
         agreement <- fetch agreementCid
         let pendingTerms = agreement.agreement.loanTerms
         assertMsg "Accepted terms do not agree with final loan agreement" $
           this.terms == pendingTerms
         exercise agreementCid PendingLoanAgreement_Sign with
-          signer = this.borrower
+          signer = this.mandateLetter.borrower
 
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
 template LoanAgreement
