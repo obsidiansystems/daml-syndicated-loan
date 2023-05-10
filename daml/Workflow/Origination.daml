@@ -82,6 +82,11 @@ template UnderwritingRequest
     key (loan.agent, uuid) : (Party, Text)
     maintainer key._1
 
+    choice UnderwritingRequest_Cancel : ()
+      controller underwriter
+      do
+        pure ()
+
     choice CreateUnderwritingResult : ContractId UnderwritingResult
       with
         result : Bool
@@ -91,6 +96,7 @@ template UnderwritingRequest
           underwriter
           agent = loan.agent
           borrower = loan.borrower
+          -- TODO: Do not just take from the application
           report = UnderwritingReport with
             instrument = this.loan.applicationData.instrument
             amount = this.loan.applicationData.amount
@@ -100,6 +106,7 @@ template UnderwritingRequest
           uuid
           result
 
+-- | This template represents the result of an underwriting report signed by an underwriter
 template UnderwritingResult
   with
     underwriter : Party
@@ -114,9 +121,9 @@ template UnderwritingResult
     maintainer key._1
 
     nonconsuming choice UnderwritingResult_OfferMandateLetter : ContractId MandateLetterOffer
-    -- TODO: Do not just take from terms
       controller agent
       do
+        assertMsg "Cannot offer a mandate letter for a declined underwriting" $ result
         create MandateLetterOffer with
           underwriter
           agent
@@ -143,15 +150,17 @@ template UnderwritingResult
           report = this.report
           participant = disclose_to
 
+-- | This represents the information about the loan application that the underwriter has determined
 data UnderwritingReport = UnderwritingReport with
     instrument : InstrumentKey
-    amount : Decimal -- Principal. TODO: for now always equal to LoanApplication.amount
+    amount : Decimal -- Principal
     maxInterestRate : RatePerAnnum -- the maximum interest rate that the applicant is underwritten for
     durationYears : Int
     -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
     prospectus : Text
   deriving (Eq, Ord, Show)
 
+-- | The information from the Underwriter's report on the application that will be shared with the applicant.
 data MandateLetter = MandateLetter
   with
     instrument : InstrumentKey
@@ -161,6 +170,8 @@ data MandateLetter = MandateLetter
     prospectus : Text
   deriving (Eq, Ord, Show)
 
+-- | This template represents an offer from the agent to a borrower to continue the loan application process under
+-- the provided terms. The underwriter has vouched for the legitimacy of this mandate letter.
 template MandateLetterOffer
   with
     agent : Party
@@ -180,6 +191,9 @@ template MandateLetterOffer
       do
         pure ()
 
+-- | This template represents a mandate letter that has been offered by the agent to the borrower, signed by the underwriter,
+-- and accepted by the borrower. It represents on-chain the consent of the borrower for the agent to reach out to lenders
+-- for consideration of the terms described.
 template AcceptedMandateLetter
   with
     agent : Party
@@ -206,7 +220,9 @@ template AcceptedMandateLetter
             rate
             durationYears = mandateLetter.durationYears
 
-
+-- | This template represents a signed underwriting report that is being shared with a prospective lender.
+-- The agent cannot request funding from a lender without providing this information. It is a separate template
+-- to maintain the privacy of the borrower until it is appropriate to reveal their identity to the relevant parties.
 template UnderwritingDisclosure
   with
     underwriter : Party
