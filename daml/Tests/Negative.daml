@@ -1,22 +1,36 @@
 module Tests.Negative where
 
-import Daml.Script
-
+import DA.Date
 import DA.Foldable
 import DA.Set qualified as Set
-import Workflow.Origination
+import Daml.Script
+
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
+import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
 
 import Scripts.Parties
 import Tests.Common(PreOriginationStuff(..), FundingSelection(..), selectFundingInterests)
+import Workflow.Origination
 
 originationTests : LedgerParties -> PreOriginationStuff -> Script ()
 originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
-    let aliceApplicationData = LoanApplicationData with
-          instrument = usdInstrument
-          amount = 12_345_678.00
-          maxInterestRate = RatePerAnnum 0.05 -- 5% per annum
-          prospectus = "To validate the syndicated loans framework :)"
-          durationYears = 10
+    now <- getTime
+    let startDate = toDateUTC now
+        (y,m,d) = toGregorian startDate
+        schedule = createPaymentPeriodicSchedule
+            (date (y+1) m d)
+            []
+            Following
+            Y 1
+            startDate
+            (date (y+10) m d)
+        aliceApplicationData = LoanApplicationData with
+            instrument = usdInstrument
+            amount = 12_345_678.00
+            maxInterestRate = RatePerAnnum 0.05 -- 5% per annum
+            prospectus = "To validate the syndicated loans framework :)"
+            durationYears = 10
+            schedule
 
         aliceLoanApplication = LoanApplicationSubmission with
             borrower = borrower_alice

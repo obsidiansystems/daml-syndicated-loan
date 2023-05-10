@@ -68,3 +68,7 @@ instance Display InstrumentKey where
 instance Display AccountKey where
   display a =
     show a.owner <> " account with " <> show a.custodian <> " custodian"
+
+displayLinesWith : Display a => (Text -> Text) -> a -> [Text]
+displayLinesWith f a =
+  (map f (T.lines $ display a))
