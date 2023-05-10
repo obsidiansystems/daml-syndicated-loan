@@ -2,11 +2,13 @@ module Tests.Common
   ( LedgerParties(..)
   , PreOriginationStuff(..)
   , OriginationSettlement(..)
+  , FundingSelection(..)
   , initialTest
   , preOrigination
   , Origination(..)
   , origination
   , settleLoan
+  , selectFundingInterests
   , Config(..)
   ) where
 
@@ -472,9 +474,9 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
   let agreement = LoanAgreement with
         agent
         participantsWithAmounts
-        borrower = acceptance.borrower
+        borrower = acceptance.mandateLetter.borrower
         uuid = acceptance.uuid
-        prospectus = acceptance.mandateLetter.prospectus
+        prospectus = acceptance.mandateLetter.mandateLetter.prospectus
         loanTerms = acceptance.terms
   submit agent $ createCmd PendingLoanAgreement with
     agreement
