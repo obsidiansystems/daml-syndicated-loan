@@ -3,9 +3,8 @@ module Tests.Negative where
 import Daml.Script
 
 import DA.Foldable
-import DA.Map (Map, empty)
-import qualified DA.Map as Map
-import qualified DA.Set as Set
+import DA.Map qualified as Map
+import DA.Set qualified as Set
 
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))

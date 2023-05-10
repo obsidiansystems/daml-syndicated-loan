@@ -4,8 +4,10 @@ module Util.Display where
 import Daml.Script
 import qualified DA.Text as T
 import qualified DA.Set as Set
+
 import qualified Daml.Finance.Settlement.Batch as Batch
 import qualified Daml.Finance.Interface.Settlement.Types as Settlement
+import Daml.Finance.Interface.Types.Common.Types
 
 -- | Converts a datatype into a human-readable string. Emphasis should be placed
 -- on readability, so instances will often produce multiline strings.
@@ -19,6 +21,21 @@ log = debugRaw . ("\n"<>). display -- We use debugRaw to ensure newlines cause l
 -- | Log a displayable datatype with a fallback
 logSome : Display a => Text -> Optional a -> Script ()
 logSome fallback = log . optional fallback display
+
+-- | Fetch a contract by ID from the ledger and log it
+logLedger
+   : (Display a, HasTemplateTypeRep a, HasToAnyTemplate a, HasFromAnyTemplate a, HasAgreement a)
+   => Party -> Text -> ContractId a -> Script ()
+logLedger party fallback cid = do
+  logSome fallback =<< queryContractId party cid
+
+showLedger
+   : (HasTemplateTypeRep a, HasToAnyTemplate a, HasFromAnyTemplate a, HasAgreement a, Show a)
+   => Party -> Text -> ContractId a -> Script ()
+showLedger party fallback cid = do
+  logSome fallback . fmap show =<< queryContractId party cid
+
+
 
 instance Display Batch.Batch where
  display b = T.intercalate "\n" $ 
@@ -40,7 +57,12 @@ instance Display Settlement.RoutedStep where
     , show r.receiver
     , "-"
     , show r.quantity.amount
-    , show r.quantity.unit.id
-    , "v" <> T.take 4 r.quantity.unit.version
-    , "(Cust. " <> show r.custodian <> ")"
+    , display r.quantity.unit
+    , "(Custod. " <> show r.custodian <> ")"
     ]
+
+instance Display Decimal where
+  display = show
+
+instance Display InstrumentKey where
+  display a = show a.id <> " v" <> (T.take 4 a.version)

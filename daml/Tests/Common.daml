@@ -1,4 +1,14 @@
-module Tests.Common where
+module Tests.Common
+  ( LedgerParties(..)
+  , PreOriginationStuff(..)
+  , OriginationSettlement(..)
+  , makeUnderwritingRequest
+  , initialTest
+  , preOrigination
+  , Origination(..)
+  , origination
+  , settleLoan
+  ) where
 
 {-
   ALL Functions in the file should have a type signature of LedgerParties -> Script a, this is because
@@ -7,26 +17,30 @@ module Tests.Common where
 -}
 
 import DA.Action
-import DA.List as L
 import DA.Foldable
 import DA.List qualified as L
 import DA.Map (Map, empty)
 import DA.Functor
 import qualified DA.Map as Map
 import qualified DA.Set as S
+import DA.List as L
+import DA.Map (Map)
+import DA.Map qualified as Map
+import DA.Set qualified as Set
 import Daml.Script
-
 
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
 import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..), Fungible(..))
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Holding.Base qualified as B
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
-import Daml.Finance.Interface.Holding.Fungible (Fungible, Fungible, SplitResult(SplitResult))
-import Daml.Finance.Interface.Holding.Transferable (Transfer)
-import Daml.Finance.Interface.Instrument.Base.Instrument (exerciseInterfaceByKey)
-import Daml.Finance.Interface.Lifecycle.Rule.Claim as ClaimI
+import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(..))
+import Daml.Finance.Interface.Holding.Fungible qualified as Fungible
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement
+import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction
+import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
+import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge))
 import Daml.Finance.Interface.Types.Common.Types
-import Daml.Finance.Lifecycle.Rule.Claim as Claim
 import Daml.Finance.Settlement.Factory (Factory(..))
 import qualified Daml.Finance.Settlement.Instruction
 import qualified Daml.Finance.Holding.Fungible as FungibleX
@@ -37,7 +51,9 @@ import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstru
 import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
 import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
 import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as SingleCustodian
+import Daml.Finance.Settlement.RouteProvider.SingleCustodian qualified as SingleCustodian
 
+import Util.Display
 import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
@@ -60,6 +76,9 @@ import DA.TextMap (fromList)
 import qualified DA.Set as Set
 import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
 import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
+import Workflow.SettlementProposal
+import Workflow.Transfer qualified as Transfer
+import Workflow.Util
 
 -- Helper Template for test batching
 template Helper with
@@ -77,7 +96,7 @@ template Helper with
       controller p
       do
         let thing = zip receiverAccounts cids
-        forA thing $ \(a, b) -> do
+        forA thing $ \(a, _b) -> do
           create Transfer.Request with
             receiverAccount = a
             instrument
@@ -120,12 +139,12 @@ perfTest LedgerParties{..} = do
           version = instrumentVersion
 
     accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed_ingrid do
-      createCmd Account.Factory with provider = fed_ingrid; observers = empty
+      createCmd Account.Factory with provider = fed_ingrid; observers = Map.empty
 
     holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
       createCmd Fungible.Factory with
         provider = fed_ingrid
-        observers = Map.fromList [("Alice", S.fromList [borrower_alice])]
+        observers = Map.fromList [("Alice", Set.fromList [borrower_alice])]
 
     let config = Config with
           instrument = usdInstrument
@@ -155,7 +174,7 @@ perfTest LedgerParties{..} = do
 
     debug $ "Length of [(ContractId Transfer.Request, ContractId Fungible)]: " <> show (L.length thing3)
     debug $ "Splitting Accept Events.."
-    forA thing3 $ splitEvents LedgerParties{..}
+    forA_ thing3 $ splitEvents LedgerParties{..}
 
     debug $ show splitCids
     debug $ show rest
@@ -207,7 +226,6 @@ setupBorrower LedgerParties{..} Config{..} amount = do
             version = instrument.version
           amount = 100000.0
     xv <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
-
     submit borrower_alice do
       exerciseCmd (coerceInterfaceContractId @Fungible xv) IFungible.Split with
         amounts = replicate amount 5.0
@@ -270,13 +288,13 @@ preOrigination LedgerParties{..} = do
       createCmd Account.Factory
         with
           provider = fed_ingrid
-          observers = Map.fromList $ (::[]) $ ("observers",) $ S.fromList $
+          observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
             [borrower_alice, borrower_bob]
 
     holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
       createCmd Fungible.Factory with
         provider = fed_ingrid
-        observers = Map.fromList $ (::[]) $ ("observers",) $ S.fromList $
+        observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $
             [borrower_alice, borrower_bob]
 
     -- ...for Hortenses's Bank
@@ -442,15 +460,20 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
           maxInterestRate = rate
           prospectus = "To test the syndicated loans framework :)"
           durationYears = 10
+  log loanApplication
   -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplication
   -- Agent coordinating the lending first asks an underwriter for a report
   underwritingRequest <- submit agent_charlie (makeUnderwritingRequest underwriter_emma uuid application)
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
-  -- Agent with underwriter's report in hand reaches out to possible lenders
+  -- Agent goes back to the borrower with a mandate letter offer
+  mandateLetterOffer <- submit agent_charlie $ exerciseCmd underwritingResult UnderwritingResult_OfferMandateLetter
+  acceptedMandateLetter <- submit borrower_alice $ exerciseCmd mandateLetterOffer MandateLetterOffer_Accept
+
+  -- Agent with underwriter's report and accepted mandate letter in hand reaches out to possible lenders
   let possibleLenders = [lender_gary, lender_hortense]
   forA_ possibleLenders $ \lender -> do
-    makeFundingRequest agent_charlie amount underwritingResult lender
+    makeFundingRequest agent_charlie amount underwritingResult acceptedMandateLetter lender
   -- Lenders make their offers
   -- TODO: Lenders declining to make an offer
   fundingInterestCids <- forA possibleLenders $ \lender -> do
@@ -461,7 +484,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     pure (cid, fundingInterest)
   -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
   let FundingSelection{..} = selectFundingInterests loanApplication fundingInterests
-  loanProposal <- submit agent_charlie $ createLoanProposal application uuid fundingSelection_ratePerAnnum
+  loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter uuid fundingSelection_ratePerAnnum
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
@@ -498,14 +521,16 @@ makeFundingRequest
     : Party
     -> Decimal
     -> ContractId UnderwritingResult
+    -> ContractId AcceptedMandateLetter
     -> Party
     -> Script (ContractId FundingRequest)
-makeFundingRequest agent amount underwriteCid lender = do
+makeFundingRequest agent amount underwriteCid mandateLetterCid lender = do
     Some underwrite <- queryContractId agent underwriteCid
     disclosedUnderwriting <- submit agent $ exerciseCmd underwriteCid UnderwritingResult_Disclose with
         disclose_to = lender
+        mandateLetterCid
     submit agent $ exerciseCmd disclosedUnderwriting MakeFundingRequest with
-        participant = lender
+        requestee = lender
 
 getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
 getFundingRequestsFor lender = query @FundingRequest lender
@@ -532,7 +557,7 @@ selectFundingInterests : LoanApplication -> [(ContractId FundingInterest, Fundin
 selectFundingInterests _ [] = error "No interests to fund loan"
 selectFundingInterests application interests =
   let sortedInterests = flip L.sortBy interests $ \(_, fi_a) (_, fi_b) -> compare fi_a.rate fi_b.rate
-      (bestRate, book, leftover) = buildBook application (RatePerAnnum 0.0) 0.0 empty interests
+      (bestRate, book, leftover) = buildBook application (RatePerAnnum 0.0) 0.0 Map.empty interests
    in FundingSelection with
         fundingSelection_ratePerAnnum = bestRate
         fundingSelection_selected = book
@@ -573,14 +598,14 @@ createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
         participantsWithAmounts
         borrower = acceptance.borrower
         uuid = acceptance.uuid
-        prospectus = acceptance.applicationData.prospectus
+        prospectus = acceptance.mandateLetter.prospectus
         loanTerms = acceptance.terms
   submit agent $ createCmd PendingLoanAgreement with
     agreement
     signed = []
 
-createLoanProposal : ContractId LoanApplication -> Text -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
-createLoanProposal applicationCid uuid rate = exerciseCmd applicationCid LoanApplication_CreateOffer with
+createLoanProposal : ContractId AcceptedMandateLetter -> Text -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
+createLoanProposal applicationCid uuid rate = exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
   uuid
   rate
 
@@ -624,19 +649,6 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       provider = borrower_alice
       observers = Set.fromList [borrower_bob, borrower_alice]
 
-  -- -- Create Route Provider
-  -- routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
-  --     createCmd SingleCustodian.SingleCustodian with
-  --       provider = fed_ingrid
-  --       observers = S.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
-  --       custodian = fed_ingrid
-
-  -- -- Create Settlement Factory
-  -- settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit fed_ingrid do
-  --   createCmd Factory with
-  --     provider = fed_ingrid
-  --     observers = S.fromList [borrower_bob, borrower_alice]
-
   -- Generate Settlement Proposal
   settlementProposalCid <- submit borrower_alice do
     createCmd SettlementProposal with
@@ -679,7 +691,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   -- Prepare to construct Allocate instructions
   -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids
   instructionViews <- forA instructionCids $ \icid -> do
-    iv <- submit borrower_alice $ exerciseCmd icid Settlement.I.GetView with viewer = borrower_alice
+    iv <- submit borrower_alice $ exerciseCmd icid Instruction.GetView with viewer = borrower_alice
     pure (icid, iv)
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
@@ -713,7 +725,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
             debugRaw $ "allocatedSettleInstructions: sender: " <> show key' <> " " <> show splitCid
             allocInstructions <- submit key' do
               exerciseCmd icid Instruction.Allocate with
-                actors = S.singleton key'
+                actors = Set.singleton key'
                 allocation = Pledge (coerceInterfaceContractId @B.Base splitCid)
 
             return ((routedStep.receiver, allocInstructions) :: accum, newMap)
