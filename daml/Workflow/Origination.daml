@@ -448,8 +448,8 @@ template FundingInterest
       controller agent
       do
         pendingAgreement <- fetch agreementCid
-        let agreement = pendingAgreement.agreement
-        case Map.lookup this.participant agreement.participantsWithAmounts of
+        let loanAgreement = pendingAgreement.loanAgreement
+        case Map.lookup this.participant loanAgreement.participantsWithAmounts of
           None -> fail "Loan terms do not include this lender"
           Some myAmount -> do
             assertMsg "Interest offered does not exceed agreed upon rate" $
@@ -501,14 +501,14 @@ template AcceptedLoan
     signatory mandateLetter.borrower, mandateLetter.agent
     choice AcceptedLoan_SignAgreement : ContractId PendingLoanAgreement
       with
-        agreementCid : ContractId PendingLoanAgreement
+        pendingAgreementCid : ContractId PendingLoanAgreement
       controller mandateLetter.agent
       do
-        agreement <- fetch agreementCid
-        let pendingTerms = agreement.agreement.loanTerms
+        pendingAgreement <- fetch pendingAgreementCid
+        let pendingTerms = pendingAgreement.loanAgreement.loanTerms
         assertMsg "Accepted terms do not agree with final loan agreement" $
           this.terms == pendingTerms
-        exercise agreementCid PendingLoanAgreement_Sign with
+        exercise pendingAgreementCid PendingLoanAgreement_Sign with
           signer = this.mandateLetter.borrower
 
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
