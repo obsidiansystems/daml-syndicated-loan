@@ -517,16 +517,15 @@ template PendingLoanAgreement
       do
         let bondInstrument = loanAgreementToBondCreate now this.agreement.loanTerms.instrument this.agreement
         bondCid <- exercise fixedRateBondFactoryCid bondInstrument
-        bondKey <- createReference
-          bondCid
-          bondInstrument.fixedRate.instrument.depository
-          bondInstrument.fixedRate.instrument.issuer
-          bondInstrument.observers
 
         create OriginatedLoanAgreement with
           agreement = this.agreement
           bondInstrument
-          bondKey
+          bondKey = InstrumentKey with
+            issuer = bondInstrument.fixedRate.instrument.issuer
+            depository = bondInstrument.fixedRate.instrument.depository
+            id = Id agreement.uuid
+            version = "0"
           bondCid
           routeProviderCid
           settlementFactoryCid
