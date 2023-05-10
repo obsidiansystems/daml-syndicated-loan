@@ -1,4 +1,10 @@
-module Workflow.SettlementProposal where
+module Workflow.SettlementProposal
+  ( SettlementProposal(..)
+  , Accept_Borrower(..)
+  , Accept_Lender(..)
+  , ExecuteSettlement(..)
+  )
+  where
 
 import DA.Functor
 import DA.List (sort)

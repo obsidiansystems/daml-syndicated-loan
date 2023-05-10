@@ -1,4 +1,8 @@
-module Workflow.CreateAccount where
+module Workflow.CreateAccount
+  ( Request(..)
+  , Accept(..)
+  )
+  where
 
 import DA.Map qualified as M (fromList)
 import DA.Set qualified as S (fromList, singleton)
