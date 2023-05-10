@@ -1,21 +1,22 @@
 module Workflow.Origination where
 
-import DA.Date (date, toGregorian, addDays, toDateUTC)
+import DA.Date (date, toGregorian, toDateUTC)
 import DA.Map (Map)
-import qualified DA.Map as Map
-import qualified DA.Set as Set
+import DA.Map qualified as Map
+import DA.Set qualified as Set
+import DA.Text qualified as T
 
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
 import Daml.Finance.Interface.Types.Common.Types (InstrumentKey(..), Id(Id))
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayAdjustment(..), BusinessDayConventionEnum(..))
+import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
 import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(..), Period(..))
-import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFrequency(..), PeriodicSchedule(..))
-import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
+import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), PeriodicSchedule(..))
+import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
 
+import Util.Display
 import Workflow.Util
-import qualified Daml.Finance.Interface.Types.Date.Calendar as Cal
-import qualified Daml.Finance.Interface.Types.Date.Schedule as Sched
 
 -- ### TODO
 --   * Include "start date" of the loan (used to calculate coupon payment dates)
@@ -28,6 +29,9 @@ import qualified Daml.Finance.Interface.Types.Date.Schedule as Sched
 -- E.g. "3.5% per annum" is represented as 0.035
 newtype RatePerAnnum = RatePerAnnum { unRatePerAnnum : Decimal }
   deriving (Eq, Show, Ord)
+
+instance Display RatePerAnnum where
+  display a = show (a.unRatePerAnnum * 100.0) <> "% per annum"
 
 data LoanApplicationData = LoanApplicationData
   with
@@ -66,6 +70,17 @@ template LoanApplication
           underwriter
           uuid
           loan = this
+
+instance Display LoanApplication where
+  display a = T.intercalate "\n" $
+    ("Loan Application from " <> show a.borrower <> " to " <> show a.agent) ::
+      (map ("> "<>) (T.lines $ display a.applicationData))
+
+instance Display LoanApplicationData where
+  display a = T.intercalate "\n"
+    [ "Requesting: " <> display a.amount <> " of " <> display a.instrument <> " at " <> display a.maxInterestRate
+    , "For: " <> a.prospectus
+    ]
 
 template UnderwritingRequest
   with

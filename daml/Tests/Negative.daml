@@ -3,7 +3,6 @@ module Tests.Negative where
 import Daml.Script
 
 import DA.Foldable
-import DA.Map (Map, empty)
 import qualified DA.Map as Map
 import qualified DA.Set as Set
 
