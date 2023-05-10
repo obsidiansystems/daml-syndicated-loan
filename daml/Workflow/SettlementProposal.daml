@@ -30,8 +30,8 @@ template SettlementProposal
     bond : InstrumentKey
     settled : Bool -- Has the 'Settle' been exercised already?
   where
-    signatory loan.agreement.borrower :: sigAccumulator
-    observer loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+    signatory loan.agreement.agent::sigAccumulator
+    observer loan.agreement.borrower::(map fst $ Map.toList loan.agreement.participantsWithAmounts)
 
     choice Settle : (ContractId SettlementProposal, (ContractId Batch.I, [ContractId Instruction.I]))
       controller loan.agreement.borrower
@@ -61,13 +61,14 @@ template SettlementProposal
 
     choice Withdraw : ()
       -- ^ Withdraw the request.
-      controller loan.agreement.borrower
+      controller loan.agreement.agent
       do pure ()
     choice ExecuteSettlement : [ContractId Base.Base]
       with
         batchCid : ContractId Batch.I
-      controller loan.agreement.borrower
+      controller loan.agreement.agent
       do
+        -- TODO: Check to make sure all signatures are in place
         exercise batchCid Batch.Settle with
           actors = Set.singleton loan.agreement.borrower
 
@@ -90,12 +91,21 @@ settleTransactions :
   -> Update (a , [c])
 settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bondInstrumentKey = do
   -- Settlement of lenders (USD)
-  let stepsUsd = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
+      -- Lenders scheduled sending of funds to Agent.
+  let stepsFromLenderUsd = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
         Step with
           sender = lender
-          receiver = loan.borrower
+          receiver = loan.agent
           quantity = Quantity loan.loanTerms.instrument investAmount
+      -- Agent schedules sending of funds to Borrower.
+      stepsToBorrowerUsd =
+        Step with
+          sender = loan.agent
+          receiver = loan.borrower
+          quantity = Quantity loan.loanTerms.instrument loan.loanTerms.amount
+      stepsUsd = stepsFromLenderUsd <> [stepsToBorrowerUsd]
   -- Settlement of lenders (bond)
+      -- Agent sends Bonds to Lenders.
   let stepsBond = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
         Step with
           sender = loan.borrower
@@ -106,7 +116,7 @@ settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactor
   routedSteps <- exercise routeProviderCid RouteProvider.Discover with
     discoverors = Set.fromList $ lendersAndBorrowers
     contextId = None
-    steps = stepsUsd ++ stepsBond
+    steps = stepsUsd <> stepsBond
 
   -- Instruct settlement
   exercise settlementFactoryCid Settlement.Instruct with

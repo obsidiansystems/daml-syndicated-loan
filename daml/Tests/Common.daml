@@ -85,6 +85,7 @@ data PreOriginationStuff = PreOriginationStuff with
   hortenseCashHoldingCid : ContractId HoldingBase.I
   garyCashHoldingCid : ContractId HoldingBase.I
   aliceCashHoldingCid : ContractId HoldingBase.I
+  charlieCashHoldingCid : ContractId HoldingBase.I
 
 -- Pre-origination set-up script that creates:
 -- - the asset in which the loans will be denominated
@@ -233,6 +234,7 @@ preOrigination LedgerParties{..} = do
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
         observers = []
+    -- allocate funds to Alice
     aliceRequestCid <- submit borrower_alice do
       createCmd CreditAccount.Request with
         account = aliceAccount
@@ -265,6 +267,27 @@ preOrigination LedgerParties{..} = do
         accountFactoryCid = accountFactoryCid
         holdingFactoryCid = holdingFactoryCid
         observers = []
+    -- allocate funds to Charlie
+    charlieRequestCid <- submit agent_charlie do
+      createCmd CreditAccount.Request with
+        account = charlieAccount
+        instrument = usdInstrument
+        amount = 6_000_000_000.00
+
+    charlieCashHoldingCid <- submit fed do exerciseCmd charlieRequestCid CreditAccount.Accept
+    -- Charlies's bond account (request)
+    charlieBondAccountRequestCid <- submit agent_charlie do
+      createCmd CreateAccount.Request with
+        custodian = borrower_alice
+        owner = agent_charlie
+    -- Hortense's bond account (accept)
+    charlieBondAccount <- submit borrower_alice do
+      exerciseCmd charlieBondAccountRequestCid CreateAccount.Accept with
+          label = "CharlieBond@Bank"
+          description = "Account for Charlie's holding of Alice's Bond at Bank"
+          accountFactoryCid = accountFactoryCid
+          holdingFactoryCid = holdingFactoryCid
+          observers = [borrower_alice]
 
     -- ...for Debbie's agency
     debbieRequestCid <- submit agent_debbie do
@@ -289,6 +312,7 @@ preOrigination LedgerParties{..} = do
       hortenseCashHoldingCid
       garyCashHoldingCid
       aliceCashHoldingCid
+      charlieCashHoldingCid
 
 data Origination = Origination with
   loanAgreement : OriginatedLoanAgreement
@@ -355,23 +379,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     (Map.keys fundingSelection_selected)
   -- Agent declines leftover funding interests
   forA_ fundingSelection_declined $ \declinedCid -> submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
-
-
-  -- Agent creates a route provider explaining how payments should flow between involved parties
-  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
-      createCmd IntermediatedStatic with
-        provider = agent_charlie
-        observers = Set.fromList [borrower_alice, lender_gary]
-        paths = Map.fromList
-          [ ("LoanInstrument", Hierarchy with
-              rootCustodian = borrower_alice
-              pathsToRootCustodian = [[lender_gary]]
-            )
-          , ("USD", Hierarchy with
-              rootCustodian = fed
-              pathsToRootCustodian = [[borrower_alice], [lender_gary]]
-            )
-          ]
+  
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
   loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
@@ -501,10 +509,8 @@ data OriginationSettlement = OriginationSettlement with
 
 settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script OriginationSettlement
 settleLoan LedgerParties {..} preOriginationStuff origination = do
-  -- TODO: Below two steps is copy/paste from runBondStep
-
   -- Generate Settlement Proposal
-  settlementProposalCid <- submit borrower_alice do
+  settlementProposalCid <- submit agent_charlie do
     createCmd SettlementProposal with
       loan = origination.loanAgreement
       sigAccumulator = []
@@ -555,9 +561,11 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         [ ((lender_gary, bondCurrency), Some preOriginationStuff.garyCashHoldingCid)
         , ((lender_hortense, bondCurrency), Some preOriginationStuff.hortenseCashHoldingCid)
         , ((borrower_alice, bondKey), Some aliceBondHoldingKey)
+        , ((agent_charlie, bondCurrency), Some preOriginationStuff.charlieCashHoldingCid)
+        -- , ((agent_charlie, bondKey), Some preOriginationStuff.ledgerAccounts.charlieBondAccount)
         ]
 
-  let f (accum, map') (icid, routedStep) = do
+      f (accum, map') (icid, routedStep) = do
         let key' = routedStep.sender
             optionalReceiverHoldingCid = Map.lookup (key', routedStep.quantity.unit) map'
         debug $ "allocatedSettleInstructions: " <> show key'
@@ -566,6 +574,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
           Some None -> fail $ "Insufficient funds for " <> show key'
           Some (Some receiverHoldingCid) -> do
             SplitResult{splitCids, rest} <- submit key' do
+              -- Check to make sure routedStep is a step dealing with USD Accounts or Bond Accounts
               exerciseCmd (coerceInterfaceContractId @Fungible receiverHoldingCid) Fungible.Split with
                 amounts = [routedStep.quantity.amount]
             debug $ "splitCids: " <> show splitCids
@@ -598,6 +607,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         , ((lender_hortense, bondCurrency), preOriginationStuff.ledgerAccounts.hortenseAccount)
 
         , ((agent_charlie, bondCurrency), preOriginationStuff.ledgerAccounts.charlieAccount)
+        , ((agent_charlie, bondKey), preOriginationStuff.ledgerAccounts.charlieBondAccount)
 
         , ((agent_debbie, bondCurrency), preOriginationStuff.ledgerAccounts.debbieAccount)
         ]
@@ -615,7 +625,8 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         approval = TakeDelivery approvingPartyAccount
 
   -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
-  settlementBases <- submit borrower_alice do
+  -- TODO: Do this without submitMulti
+  settlementBases <- submitMulti [agent_charlie, borrower_alice] [] do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
   -- Pick out each party's holdings from the list of returned contract id's
