@@ -52,20 +52,8 @@ import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
 import Workflow.SettlementProposal
 
--- | Parties representing various agents in the syndicated loan workflow
--- Each type of agent has two representatives so that we can test disclosure
--- and divulgence.
-data LedgerParties = LedgerParties with
-    borrower_alice : Party
-    borrower_bob : Party
-    agent_charlie : Party
-    agent_debbie : Party
-    underwriter_emma : Party
-    underwriter_fred : Party
-    lender_gary : Party
-    lender_hortense : Party
-    fed_ingrid : Party
-  deriving (Show, Eq, Ord)
+import Scripts.Parties
+import Scripts.Accounts
 
 -- | Test that does not exercise the lending workflow as such, but
 -- exercises transfers on the ledger to help us estimate throughput
@@ -93,22 +81,6 @@ data PreOriginationStuff = PreOriginationStuff with
   hortenseCashHoldingCid : ContractId HoldingBase.I
   garyCashHoldingCid : ContractId HoldingBase.I
   aliceCashHoldingCid : ContractId HoldingBase.I
-
--- | Only a subset of the parties involved need to have accounts
--- to exercise the lifecycle of the loan.
--- In particular, the depository/issuer, and underwriters do not
--- need accounts.
-data LedgerAccounts = LedgerAccounts with
-    aliceAccount : AccountKey
-    aliceBondAccount : AccountKey
-    bobAccount : AccountKey
-    charlieAccount : AccountKey
-    debbieAccount : AccountKey
-    garyAccount : AccountKey -- Cash account
-    garyBondAccount : AccountKey
-    hortenseAccount : AccountKey
-    hortenseBondAccount : AccountKey
-  deriving (Show, Eq, Ord)
 
 -- Pre-origination set-up script that creates:
 -- - the asset in which the loans will be denominated

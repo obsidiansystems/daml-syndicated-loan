@@ -28,6 +28,7 @@ import Daml.Finance.Settlement.Factory (observers, provider, Factory(Factory))
 import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
 import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
 
+import Scripts.Parties
 import Tests.Common
 import Tests.IDE
 import Util.Display
