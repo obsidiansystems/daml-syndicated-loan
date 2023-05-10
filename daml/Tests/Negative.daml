@@ -9,11 +9,11 @@ import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Fol
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
 
 import Scripts.Parties
-import Tests.Common(PreOriginationStuff(..), FundingSelection(..), selectFundingInterests)
+import Tests.Common(PreOrigination(..), FundingSelection(..), selectFundingInterests)
 import Workflow.Origination
 
-originationTests : LedgerParties -> PreOriginationStuff -> Script ()
-originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
+originationTests : LedgerParties -> PreOrigination -> Script ()
+originationTests ps@LedgerParties{..} PreOrigination{..} = do
     now <- getTime
     let startDate = toDateUTC now
         (y,m,d) = toGregorian startDate

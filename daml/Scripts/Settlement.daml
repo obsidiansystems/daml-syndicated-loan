@@ -37,13 +37,13 @@ data SettlementState = SettlementState
 runCreateParties : Script LedgerParties
 runCreateParties = createParties
 
-runPreOrigination : Script (LedgerParties, PreOriginationStuff)
+runPreOrigination : Script (LedgerParties, PreOrigination)
 runPreOrigination = do
   parties <- createParties
   preOrig <- preOrigination parties
   pure (parties, preOrig)
 
-runOrigination : Script (LedgerParties, PreOriginationStuff, Origination)
+runOrigination : Script (LedgerParties, PreOrigination, Origination)
 runOrigination = do
   (parties, preOrig) <- runPreOrigination
   orig <- origination parties preOrig
@@ -63,8 +63,8 @@ run = do
 -- 3. credits a token holding to Alice in her bank account
 -- 4. atomically exchanges the token against the cash holding
 
-runBondStep : LedgerParties -> PreOriginationStuff -> Origination -> OriginationSettlement -> Script ()
-runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement{..} = do
+runBondStep : LedgerParties -> PreOrigination -> Origination -> OriginationSettlement -> Script ()
+runBondStep LedgerParties{..} PreOrigination{..} orig OriginationSettlement{..} = do
   let borrower = orig.loanAgreement.agreement.borrower
       lender = lender_gary
       agent = orig.loanAgreement.agreement.agent

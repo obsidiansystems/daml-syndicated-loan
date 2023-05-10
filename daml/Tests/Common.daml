@@ -1,6 +1,6 @@
 module Tests.Common
   ( LedgerParties(..)
-  , PreOriginationStuff(..)
+  , PreOrigination(..)
   , OriginationSettlement(..)
   , FundingSelection(..)
   , initialTest
@@ -73,15 +73,15 @@ data Config = Config with
 -- of our settlement strategy.
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
-  preOriginationStuff <- preOrigination parties
-  origination : Origination <- origination parties preOriginationStuff
-  originationSettlement <- settleLoan parties preOriginationStuff origination
+  preOrigination <- preOrigination parties
+  origination : Origination <- origination parties preOrigination
+  originationSettlement <- settleLoan parties preOrigination origination
   -- servicing parties originationData
   pure ()
 
 -- | Information required for denominating the loans
 -- and settling payments.
-data PreOriginationStuff = PreOriginationStuff with
+data PreOrigination = PreOrigination with
   accountFactoryCid : ContractId Account.F
   holdingFactoryCid : ContractId Holding.F
   fixedRateBondFactoryCid : ContractId FixedRate.F
@@ -99,7 +99,7 @@ data PreOriginationStuff = PreOriginationStuff with
 -- - the issuer and depository for the asset (for simplicity, they are the same party)
 -- - the accounts for the agents, lenders, and borrowers
 -- - initial assets for the lenders
-preOrigination : LedgerParties -> Script PreOriginationStuff
+preOrigination : LedgerParties -> Script PreOrigination
 preOrigination parties@(LedgerParties{..}) = do
     -- USD instrument definition
     let usdInstrument = mkUsd fed 
@@ -148,7 +148,7 @@ preOrigination parties@(LedgerParties{..}) = do
     (debbieAccount, None) <- mkCashAccount agent_debbie 0.0
 
     let ledgerAccounts = LedgerAccounts with ..
-    return $ PreOriginationStuff with
+    return $ PreOrigination with
       accountFactoryCid
       holdingFactoryCid
       fixedRateBondFactoryCid
@@ -189,8 +189,8 @@ acceptLoanApplication agent application uuid = do
   return result
 
 
-origination : LedgerParties -> PreOriginationStuff -> Script Origination
-origination LedgerParties{..} PreOriginationStuff{..} = do
+origination : LedgerParties -> PreOrigination -> Script Origination
+origination LedgerParties{..} PreOrigination{..} = do
   now <- getTime
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
@@ -387,22 +387,22 @@ data OriginationSettlement = OriginationSettlement with
   lenderGaryBondHolding : ContractId Fungible.Fungible
   lenderHortenseBondHolding : ContractId Fungible.Fungible
 
-settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script OriginationSettlement
-settleLoan LedgerParties {..} preOriginationStuff origination = do
+settleLoan : LedgerParties -> PreOrigination -> Origination -> Script OriginationSettlement
+settleLoan LedgerParties {..} preOrigination origination = do
   -- Generate Settlement Proposal
   settlementProposalCid <- submit agent_charlie do
     createCmd SettlementProposal with
       loan = origination.loanAgreement
       sigAccumulator = []
-      routeProviderCid = preOriginationStuff.routeProviderCid
-      settlementFactoryCid = preOriginationStuff.settlementFactoryCid
+      routeProviderCid = preOrigination.routeProviderCid
+      settlementFactoryCid = preOrigination.settlementFactoryCid
       bond = origination.loanAgreement.bondKey
       settled = False
 
   -- Create a bond holding request
   aliceBondRequestCid <- submit borrower_alice do
     createCmd CreditAccount.Request with
-      account = preOriginationStuff.ledgerAccounts.aliceLoanAccount
+      account = preOrigination.ledgerAccounts.aliceLoanAccount
       instrument = origination.loanAgreement.bondKey
       amount = origination.loanAgreement.agreement.loanTerms.amount
 
@@ -438,11 +438,11 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   -- initiate Map Party (ContractId Holding)
   let partyHoldingsMap : Map (Party, InstrumentKey) (Optional (ContractId HoldingBase.Base))
       partyHoldingsMap = Map.fromList
-        [ ((lender_gary, bondCurrency), Some preOriginationStuff.garyCashHoldingCid)
-        , ((lender_hortense, bondCurrency), Some preOriginationStuff.hortenseCashHoldingCid)
+        [ ((lender_gary, bondCurrency), Some preOrigination.garyCashHoldingCid)
+        , ((lender_hortense, bondCurrency), Some preOrigination.hortenseCashHoldingCid)
         , ((borrower_alice, bondKey), Some aliceBondHoldingKey)
-        , ((agent_charlie, bondCurrency), Some preOriginationStuff.charlieCashHoldingCid)
-        -- , ((agent_charlie, bondKey), Some preOriginationStuff.ledgerAccounts.charlieLoanAccount)
+        , ((agent_charlie, bondCurrency), Some preOrigination.charlieCashHoldingCid)
+        -- , ((agent_charlie, bondKey), Some preOrigination.ledgerAccounts.charlieLoanAccount)
         ]
 
       f (accum, map') (icid, routedStep) = do
@@ -471,21 +471,21 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
   -- initiate Map Party AccountKey
   let partyAccountMap = Map.fromList
-        [ ((borrower_alice, bondKey), preOriginationStuff.ledgerAccounts.aliceLoanAccount)
-        , ((borrower_alice, bondCurrency), preOriginationStuff.ledgerAccounts.aliceAccount)
+        [ ((borrower_alice, bondKey), preOrigination.ledgerAccounts.aliceLoanAccount)
+        , ((borrower_alice, bondCurrency), preOrigination.ledgerAccounts.aliceAccount)
 
-        , ((borrower_bob, bondCurrency), preOriginationStuff.ledgerAccounts.bobAccount)
+        , ((borrower_bob, bondCurrency), preOrigination.ledgerAccounts.bobAccount)
 
-        , ((lender_gary, bondKey), preOriginationStuff.ledgerAccounts.garyLoanAccount)
-        , ((lender_gary, bondCurrency), preOriginationStuff.ledgerAccounts.garyAccount)
+        , ((lender_gary, bondKey), preOrigination.ledgerAccounts.garyLoanAccount)
+        , ((lender_gary, bondCurrency), preOrigination.ledgerAccounts.garyAccount)
 
-        , ((lender_hortense, bondKey), preOriginationStuff.ledgerAccounts.hortenseLoanAccount)
-        , ((lender_hortense, bondCurrency), preOriginationStuff.ledgerAccounts.hortenseAccount)
+        , ((lender_hortense, bondKey), preOrigination.ledgerAccounts.hortenseLoanAccount)
+        , ((lender_hortense, bondCurrency), preOrigination.ledgerAccounts.hortenseAccount)
 
-        , ((agent_charlie, bondCurrency), preOriginationStuff.ledgerAccounts.charlieAccount)
-        , ((agent_charlie, bondKey), preOriginationStuff.ledgerAccounts.charlieLoanAccount)
+        , ((agent_charlie, bondCurrency), preOrigination.ledgerAccounts.charlieAccount)
+        , ((agent_charlie, bondKey), preOrigination.ledgerAccounts.charlieLoanAccount)
 
-        , ((agent_debbie, bondCurrency), preOriginationStuff.ledgerAccounts.debbieAccount)
+        , ((agent_debbie, bondCurrency), preOrigination.ledgerAccounts.debbieAccount)
         ]
 
   -- Have each party approve of transaction instructions
