@@ -1,12 +1,11 @@
 module Workflow.Util where
 
+import DA.Map (Map)
 import Daml.Script
 
-import DA.Map (Map)
-import Daml.Finance.Interface.Instrument.Base.Instrument qualified as Instrument
-import Daml.Finance.Interface.Types.Common.Types (Parties, InstrumentKey(..))
-import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
 import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument)
+import Daml.Finance.Interface.Instrument.Base.Instrument qualified as BaseInstrument
+import Daml.Finance.Interface.Types.Common.Types (Parties, InstrumentKey(..))
 
 type BondInstrument = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
 

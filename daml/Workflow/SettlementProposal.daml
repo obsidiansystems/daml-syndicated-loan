@@ -47,10 +47,10 @@ template SettlementProposal
       controller currLender
       do
         assertMsg "Must be an authorized lender" $ elem currLender (map fst $ Map.toList loan.participantsWithAmounts)
-        let lendersAndBorrowers : [Party] = loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
+        let lendersAndBorrowers : [Party] = loan.borrower :: map fst (Map.toList loan.participantsWithAmounts)
             id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         debug $ show lendersAndBorrowers
-        if sigAccumulator == loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts) then do
+        if sigAccumulator == loan.borrower :: map fst (Map.toList loan.participantsWithAmounts) then do
           (batchCid, settleInstructions) <- settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bond
           updatedContract <- create this with sigAccumulator = currLender::sigAccumulator
           return $ Right (updatedContract, batchCid, settleInstructions)
@@ -62,7 +62,7 @@ template SettlementProposal
 
     choice Decline : ()
       -- ^ Decline the request.
-      controller loan.borrower::(map fst $ Map.toList loan.participantsWithAmounts)
+      controller loan.borrower :: map fst (Map.toList loan.participantsWithAmounts)
       do pure ()
 
     choice Withdraw : ()

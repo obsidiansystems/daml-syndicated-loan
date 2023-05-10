@@ -4,6 +4,7 @@ module Util.Display where
 import Daml.Script
 import qualified DA.Text as T
 import qualified DA.Set as Set
+
 import qualified Daml.Finance.Settlement.Batch as Batch
 import qualified Daml.Finance.Interface.Settlement.Types as Settlement
 import Daml.Finance.Interface.Types.Common.Types
