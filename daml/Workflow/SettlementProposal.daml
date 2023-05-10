@@ -123,7 +123,7 @@ settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactor
       -- Agent sends Bonds to Lenders.
   let stepsBond = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
         Step with
-          sender = loan.agent
+          sender = loan.borrower
           receiver = lender
           quantity = Quantity bondInstrumentKey investAmount
 

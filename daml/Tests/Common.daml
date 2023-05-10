@@ -509,15 +509,15 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
       createCmd IntermediatedStatic with
         provider = agent_charlie
-        observers = Set.fromList [borrower_alice, lender_gary, lender_hortense, agent_charlie]
+        observers = Set.fromList [borrower_alice, lender_gary, lender_hortense]
         paths = Map.fromList
           [ ("LoanInstrument", Hierarchy with
               rootCustodian = borrower_alice
-              pathsToRootCustodian = [[lender_gary], [lender_hortense], [agent_charlie]]
+              pathsToRootCustodian = [[lender_gary], [lender_hortense]]
             )
           , ("USD", Hierarchy with
               rootCustodian = fed_ingrid
-              pathsToRootCustodian = [[borrower_alice], [lender_gary], [lender_hortense], [agent_charlie]]
+              pathsToRootCustodian = [[borrower_alice], [lender_gary], [lender_hortense]]
             )
           ]
 
@@ -525,7 +525,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
     createCmd Factory with
       provider = agent_charlie
-      observers = Set.fromList [borrower_alice,lender_gary, lender_hortense, agent_charlie]
+      observers = Set.fromList [borrower_alice,lender_gary, lender_hortense]
   
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
@@ -657,10 +657,10 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   -- TODO: Below two steps is copy/paste from runBondStep
 
   -- 1. Create Route Provider
-  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit borrower_alice do
+  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
       createCmd IntermediatedStatic with
-        provider = borrower_alice
-        observers = Set.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
+        provider = agent_charlie
+        observers = Set.fromList [borrower_alice, lender_gary, lender_hortense]
         paths = Map.fromList
           [ ("LoanInstrument", Hierarchy with
               rootCustodian = borrower_alice
@@ -668,15 +668,15 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
             )
           , ("USD", Hierarchy with
               rootCustodian = fed_ingrid
-              pathsToRootCustodian = [[borrower_alice], [lender_gary], [lender_hortense]]
+              pathsToRootCustodian = [[borrower_alice], [lender_gary], [lender_hortense], [agent_charlie]]
             )
           ]
 
   -- 2. Create Settlement Factory
-  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit borrower_alice do
+  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
     createCmd Factory with
-      provider = borrower_alice
-      observers = Set.fromList [borrower_bob, borrower_alice]
+      provider = agent_charlie
+      observers = Set.fromList [borrower_alice, lender_gary, lender_hortense]
 
   -- Generate Settlement Proposal
   settlementProposalCid <- submit agent_charlie do
@@ -796,7 +796,8 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         approval = TakeDelivery approvingPartyAccount
 
   -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
-  settlementBases <- submit borrower_alice do
+  -- TODO: Do this without submitMulti
+  settlementBases <- submitMulti [agent_charlie, borrower_alice] [] do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
   -- Pick out each party's holdings from the list of returned contract id's
