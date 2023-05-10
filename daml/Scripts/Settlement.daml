@@ -93,11 +93,9 @@ runOrigination = do
 run : Script ()
 run = do
   setTime (time (date 2023 Apr 12) 4 4 4)
-  p <- createParties
-  po <- preOrigination p
-  origination <- origination p po
-  originationSettlement <- settleLoan p po origination
-  runBondStep p po originationSettlement
+  (p, po, o) <- runOrigination
+  originationSettlement <- settleLoan p po o
+  runBondStep p po o originationSettlement
   return ()
 
 -- | Test script that
@@ -106,8 +104,8 @@ run = do
 -- 3. credits a token holding to Alice in her bank account
 -- 4. atomically exchanges the token against the cash holding
 
-runBondStep : LedgerParties -> PreOriginationStuff -> OriginationSettlement -> Script ()
-runBondStep LedgerParties{..} PreOriginationStuff{..} OriginationSettlement{..} = do
+runBondStep : LedgerParties -> PreOriginationStuff -> Origination -> OriginationSettlement -> Script ()
+runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement{..} = do
   let borrower = borrower_alice
       lender = lender_gary
       agent = agent_charlie
@@ -145,8 +143,6 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} OriginationSettlement{..} 
       provider = borrower
       observers = Set.fromList [borrower]
 
-
-  orig <- origination (LedgerParties{..}) (PreOriginationStuff{..})
   now <- getTime
 
   let (y',m',d') = toGregorian (toDateUTC now)
