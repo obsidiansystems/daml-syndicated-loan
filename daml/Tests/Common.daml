@@ -10,12 +10,14 @@ import DA.Action
 import DA.Foldable
 import DA.List qualified as L
 import DA.Map (Map, empty)
+import DA.Functor
 import qualified DA.Map as Map
 import qualified DA.Set as S
 import Daml.Script
 
+
 import Daml.Finance.Account.Account qualified as Account (Factory(..))
-import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..))
+import Daml.Finance.Holding.Fungible qualified as Fungible (Factory (..), Fungible(..))
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
 import Daml.Finance.Interface.Holding.Fungible (Fungible, Fungible, SplitResult(SplitResult))
@@ -28,7 +30,7 @@ import Daml.Finance.Settlement.Factory (Factory(..))
 import qualified Daml.Finance.Holding.Fungible as FungibleX
 import qualified Daml.Finance.Holding.Fungible as FungibleX
 import qualified Daml.Finance.Interface.Holding.Base as B
-import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
+import qualified Daml.Finance.Interface.Holding.Fungible as IFungible
 import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
 import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
 import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
@@ -37,7 +39,6 @@ import qualified Daml.Finance.Settlement.RouteProvider.SingleCustodian as Single
 import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Origination
-import qualified Daml.Finance.Interface.Holding.Fungible as Fungible
 import Daml.Finance.Interface.Holding.Fungible (I, Fungible, Fungible, SplitResult(SplitResult))
 import qualified Daml.Finance.Interface.Holding.Base as B
 import Workflow.SettlementProposal
@@ -47,8 +48,12 @@ import qualified Daml.Finance.Interface.Settlement.Instruction as Instruction
 import qualified Daml.Finance.Interface.Settlement.Instruction as Settlement.I
 import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge))
 import qualified Daml.Finance.Interface.Settlement.Batch as Batch
-import DA.List.Total (head)
+import DA.List (head)
+import qualified DA.List.Total
 import DA.Optional (fromSome, isSome)
+import Daml.Finance.Interface.Holding.Base (Base)
+import DA.NonEmpty (NonEmpty)
+import qualified DA.NonEmpty as NE
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -106,7 +111,7 @@ perfTest LedgerParties{..} = do
           amount = 100000.0
     xv <- submit fed_ingrid do exerciseCmd requestMon CreditAccount.Accept
     SplitResult{..} <- submit borrower_alice do
-      exerciseCmd (coerceInterfaceContractId @Fungible xv) Fungible.Split with
+      exerciseCmd (coerceInterfaceContractId @Fungible xv) IFungible.Split with
         amounts = replicate 100 5.0
 
     accountkeys <- forA [1..100] $ \x -> do
@@ -137,7 +142,7 @@ initialTest : LedgerParties -> Script ()
 initialTest parties = do
   preOriginationStuff <- preOrigination parties
   origination : Origination <- origination parties preOriginationStuff
-  _ <- settleLoan parties preOriginationStuff origination
+  originationSettlement <- settleLoan parties preOriginationStuff origination
   -- servicing parties originationData
   pure ()
 
@@ -299,9 +304,6 @@ data Origination = Origination with
   loanAgreement : LoanAgreement
   loanAgreementCid : ContractId LoanAgreement
   bond : Bond
-  aliceBondAccountKey : AccountKey
-  garyBondAccountKey : AccountKey
-  garyBondHoldingKey : ContractId B.I
 
 origination : LedgerParties -> PreOriginationStuff -> Script Origination
 origination LedgerParties{..} PreOriginationStuff{..} = do
@@ -354,60 +356,10 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   (loanAgreementCid, bond) <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
 
-  aliceAccountRequestCid <- submit borrower_alice do
-    createCmd CreateAccount.Request with
-      custodian = borrower_alice
-      owner = borrower_alice
-
-  aliceBondAccountKey <- submit borrower_alice do
-    exerciseCmd aliceAccountRequestCid CreateAccount.Accept with
-        label = "AliceBond@Bank"
-        description = "Account for Alice's Bond at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = []
-
-  aliceBondRequestCid <- submit borrower_alice do
-    createCmd CreditAccount.Request with
-      account = ledgerAccounts.aliceAccount
-      instrument = bond.reference
-      amount = loanAgreement.loanTerms.amount
-
-  aliceBondHoldingKey <- submit fed_ingrid do
-    exerciseCmd aliceBondRequestCid CreditAccount.Accept
-
-  garyAccountRequestCid <- submit lender_gary do
-    createCmd CreateAccount.Request with
-      custodian = borrower_alice
-      owner = lender_gary
-
-  garyBondAccountKey <- submit borrower_alice do
-    exerciseCmd garyAccountRequestCid CreateAccount.Accept with
-        label = "GaryBond@Bank"
-        description = "Account for Gary's holding of Alice's Bond at Bank"
-        accountFactoryCid = accountFactoryCid
-        holdingFactoryCid = holdingFactoryCid
-        observers = [borrower_alice]
-
-  bondTransferReq <- submit lender_gary do
-    createCmd Transfer.Request with
-      receiverAccount = garyBondAccountKey
-      instrument = bond.reference
-      amount = loanAgreement.loanTerms.amount
-      currentOwner = borrower_alice
-
-  garyBondHoldingKey <- submit borrower_alice do
-    exerciseCmd bondTransferReq Transfer.Accept with
-      holdingCid = aliceBondHoldingKey
-
   pure Origination with
     loanAgreement
     loanAgreementCid
     bond
-    aliceBondAccountKey
-    garyBondAccountKey
-    garyBondHoldingKey
-
 
 type Amount = Decimal
 
@@ -527,7 +479,12 @@ servicing LedgerParties{..} origination = do
   -}
   pure ()
 
-settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script ()
+data OriginationSettlement = OriginationSettlement with
+  borrowerAliceUsdHolding : NonEmpty FungibleX.Fungible
+  lenderGaryBondHolding : FungibleX.Fungible
+  lenderHortenseBondHolding : FungibleX.Fungible
+
+settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script OriginationSettlement
 settleLoan LedgerParties {..} preOriginationStuff origination = do
   -- Create Route Provider
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit fed_ingrid do
@@ -614,12 +571,12 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
           Some None -> fail $ "Insufficient funds for " <> show key'
           Some (Some receiverHoldingCid) -> do
             SplitResult{splitCids, rest} <- submit key' do
-              exerciseCmd (coerceInterfaceContractId @Fungible receiverHoldingCid) Fungible.Split with
+              exerciseCmd (coerceInterfaceContractId @Fungible receiverHoldingCid) IFungible.Split with
                 amounts = [routedStep.quantity.amount]
             debug $ "splitCids: " <> show splitCids
             debug $ "rest: " <> show rest
             assertMsg "we only split a single amount" $ Prelude.length splitCids == 1
-            let Some splitCid = head splitCids
+            let Some splitCid = DA.List.Total.head splitCids
                 newMap = Map.insert key' (coerceInterfaceContractId @B.Base <$> rest) map'
 
             allocInstructions <- submit key' do
@@ -648,17 +605,77 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       actors = S.singleton approvingParty
       approval = TakeDelivery approvingPartyAccount
 
-  -- WARN: This can only be used in scripts, not on DAML Hub
-  -- Settle batched transactions atomically
-  -- holdingCids <- submitMulti [agent_charlie, borrower_alice, lender_gary, lender_hortense] [] do
-  --     exerciseCmd batchCid Batch.Settle with
-  --       actors = S.singleton agent_charlie
-
   -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
   settlementBases <- submit borrower_alice do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
-  return ()
+  -- Pick out each party's holdings from the list of returned contract id's
+  let settlementFungibleCids : [ContractId FungibleX.Fungible]
+      settlementFungibleCids = fromInterfaceContractId @FungibleX.Fungible <$> settlementBases
+      settlementParties = [borrower_alice, lender_gary, lender_hortense]
+
+  fungibles <- filter ((`Prelude.elem` settlementFungibleCids) . fst) . mconcat <$>
+    forA settlementParties (query @FungibleX.Fungible)
+
+  let settlementFungibleMap : Map.Map Party [FungibleX.Fungible] -- Owner to fungibles
+      settlementFungibleMap = createFungiblesMap (map snd fungibles)
+
+  borrowerAliceUsdHolding <- lookupNonEmptyUsdHoldings borrower_alice settlementFungibleMap
+  lenderGaryBondHolding <- lookupSingleBondHolding lender_gary settlementFungibleMap
+  lenderHortenseBondHolding <- lookupSingleBondHolding lender_hortense settlementFungibleMap
+
+  return $ OriginationSettlement with
+    borrowerAliceUsdHolding
+    lenderGaryBondHolding
+    lenderHortenseBondHolding
+  where
+    createFungiblesMap
+      : [FungibleX.Fungible]
+      -> Map.Map Party [FungibleX.Fungible] -- Owner to fungibles
+    createFungiblesMap fungiblesList =
+      Map.fromListWith (++) $ fungiblesList <&> \fungible ->
+        (fungible.account.owner, [fungible])
+
+    lookupNonEmptyUsdHoldings party settlementFungibleMap =
+      let bondCurrency = origination.bond.instrument.currency
+      in optional
+        (fail $ show party <> " not found in settlementFungibleMap: " <> show settlementFungibleMap)
+        (\values ->
+          optional
+            (fail $ show party <> " has no holdings of " <> show bondCurrency)
+            pure
+            (NE.nonEmpty $ filter ((== bondCurrency) . (.instrument)) values)
+        )
+        (Map.lookup party settlementFungibleMap)
+
+    lookupSingleBondHolding
+      :  ActionFail m
+      => Party
+      -> Map.Map Party [FungibleX.Fungible]
+      -> m FungibleX.Fungible
+    lookupSingleBondHolding party settlementFungibleMap = optional
+      (fail $ show party <> " not found in settlementFungibleMap: " <> show settlementFungibleMap)
+      (\values ->
+        optional
+          (fail $ show party <> " has no bond holdings")
+          (\nonEmptyBondsList ->
+            if Prelude.length (NE.toList nonEmptyBondsList) == 1
+              then pure $ head $ NE.toList nonEmptyBondsList
+              else fail $ "Expected " <> show party <> " to hold exactly one Alice-bond"
+          )
+          (NE.nonEmpty $ filter ((== origination.bond.reference) . (.instrument)) values)
+      )
+      (Map.lookup lender_hortense settlementFungibleMap)
+
+
+    debugPrintFungiblesFor prefix parties holdingCids = do
+      res <- mconcat <$> forA parties (query @FungibleX.Fungible)
+      let allFungibles = filter ((`Prelude.elem` holdingCids) . fst) res
+          partyToFungible : Map.Map Party [FungibleX.Fungible]
+          partyToFungible = createFungiblesMap (map snd allFungibles)
+      forA_ (Map.toList partyToFungible) $ \(party, fungibleList) -> do
+        debugRaw $ prefix <> ": " <> show party
+        forA_ fungibleList $ \fungible -> debugRaw $ "\t" <> show fungible
 
 createRouteProvider : LedgerParties -> Script (ContractId RouteProvider.I)
 createRouteProvider LedgerParties {..} = do
