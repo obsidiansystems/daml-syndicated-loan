@@ -5,6 +5,7 @@ module Workflow.Origination
   , AcceptedLoanApplication_StartProcess(..)
   , AcceptedMandateLetter(..)
   , AcceptedMandateLetter_CreateOffer(..)
+  , AcceptedMandateLetter_CreateToken(..)
   , CreateUnderwritingResult(..)
   , FundingInterest(..)
   , FundingInterest_Decline(..)
@@ -258,10 +259,10 @@ template UnderwritingResult
     nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
       with
         disclose_to : Party
-        mandateLetterCid : ContractId AcceptedMandateLetter
+        mandateLetterTokenCid : ContractId AcceptedMandateLetterToken
       controller application.agent
       do
-        letter <- fetch mandateLetterCid
+        letter <- fetch mandateLetterTokenCid
         assertMsg "Provided mandate letter was not for this underwriting report" $ letter.reportCid == self
         create UnderwritingDisclosure with
           underwriter
@@ -343,6 +344,21 @@ template AcceptedMandateLetter
             rate
             durationYears = mandateLetter.durationYears
             schedule = application.applicationData.schedule
+    nonconsuming choice AcceptedMandateLetter_CreateToken : ContractId AcceptedMandateLetterToken
+      controller agent
+      do
+        create AcceptedMandateLetterToken with
+          borrower
+          agent
+          reportCid
+
+template AcceptedMandateLetterToken
+  with
+    borrower : Party
+    agent : Party
+    reportCid : ContractId UnderwritingResult
+  where
+    signatory borrower, agent
 
 -- | This template represents a signed underwriting report that is being shared with a prospective lender.
 -- The agent cannot request funding from a lender without providing this information. It is a separate template
@@ -443,8 +459,8 @@ template FundingInterest
       controller agent
       do
         pendingAgreement <- fetch agreementCid
-        let agreement = pendingAgreement.agreement
-        case Map.lookup this.participant agreement.participantsWithAmounts of
+        let loanAgreement = pendingAgreement.loanAgreement
+        case Map.lookup this.participant loanAgreement.participantsWithAmounts of
           None -> fail "Loan terms do not include this lender"
           Some myAmount -> do
             assertMsg "Interest offered does not exceed agreed upon rate" $
@@ -498,14 +514,14 @@ template AcceptedLoan
     signatory mandateLetter.borrower, mandateLetter.agent
     choice AcceptedLoan_SignAgreement : ContractId PendingLoanAgreement
       with
-        agreementCid : ContractId PendingLoanAgreement
+        pendingAgreementCid : ContractId PendingLoanAgreement
       controller mandateLetter.agent
       do
-        agreement <- fetch agreementCid
-        let pendingTerms = agreement.agreement.loanTerms
+        pendingAgreement <- fetch pendingAgreementCid
+        let pendingTerms = pendingAgreement.loanAgreement.loanTerms
         assertMsg "Accepted terms do not agree with final loan agreement" $
           this.terms == pendingTerms
-        exercise agreementCid PendingLoanAgreement_Sign with
+        exercise pendingAgreementCid PendingLoanAgreement_Sign with
           signer = this.mandateLetter.borrower
 
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
@@ -523,12 +539,12 @@ template LoanAgreement
 
 template PendingLoanAgreement
   with
-    agreement : LoanAgreement
+    loanAgreement : LoanAgreement
     signed : [Party]
   where
     -- TODO: ensure clause
-    signatory agreement.agent, signed
-    observer (Map.keys agreement.participantsWithAmounts), agreement.borrower
+    signatory loanAgreement.agent, signed
+    observer (Map.keys loanAgreement.participantsWithAmounts), loanAgreement.borrower
     choice PendingLoanAgreement_Sign : ContractId PendingLoanAgreement
       with
         signer : Party
@@ -542,18 +558,18 @@ template PendingLoanAgreement
         routeProviderCid : ContractId RouteProvider.I
         settlementFactoryCid : ContractId Settlement.F
         fixedRateBondFactoryCid : ContractId FixedRate.F
-      controller agreement.agent
+      controller loanAgreement.agent
       do
-        let bondInstrument = loanAgreementToBondCreate now this.agreement.loanTerms.instrument this.agreement
+        let bondInstrument = loanAgreementToBondCreate now this.loanAgreement.loanTerms.instrument this.loanAgreement
         bondCid <- exercise fixedRateBondFactoryCid bondInstrument
         let bondKey = InstrumentKey with
               issuer = bondInstrument.fixedRate.instrument.issuer
               depository = bondInstrument.fixedRate.instrument.depository
-              id = Id agreement.uuid
+              id = Id loanAgreement.uuid
               version = "0"
-            agent = agreement.agent
-            borrower = agreement.borrower
-            lenders = Map.keys agreement.participantsWithAmounts
+            agent = loanAgreement.agent
+            borrower = loanAgreement.borrower
+            lenders = Map.keys loanAgreement.participantsWithAmounts
             lenderSet = Set.fromList lenders
         lifecycleRule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
           create $ LifecycleRule.Rule with
@@ -571,7 +587,7 @@ template PendingLoanAgreement
             settlementFactoryCid
             netInstructions = False
         create OriginatedLoanAgreement with
-          agreement = this.agreement
+          loanAgreement = this.loanAgreement
           bondInstrument
           bondKey
           bondCid
@@ -586,7 +602,7 @@ data OriginatedLoanAgreement_LifecycleData = OriginatedLoanAgreement_LifecycleDa
 
 template OriginatedLoanAgreement
   with
-    agreement : LoanAgreement
+    loanAgreement : LoanAgreement
     bondInstrument : BondInstrument
     bondKey : InstrumentKey
     bondCid : ContractId BaseInstrument.I
@@ -596,12 +612,12 @@ template OriginatedLoanAgreement
     claimRule : ContractId Claim.Claim
 
   where
-    signatory agreement.agent, agreement.borrower, Map.keys agreement.participantsWithAmounts
-    ensure sum (Map.values agreement.participantsWithAmounts) == agreement.loanTerms.amount
+    signatory loanAgreement.agent, loanAgreement.borrower, Map.keys loanAgreement.participantsWithAmounts
+    ensure sum (Map.values loanAgreement.participantsWithAmounts) == loanAgreement.loanTerms.amount
 
     nonconsuming choice OriginatedLoanAgreement_Lifecycle : OriginatedLoanAgreement_LifecycleData
       with today : Date
-      controller agreement.agent
+      controller loanAgreement.agent
       do
         let parties = Set.fromList (signatory this)
             updateEvent = clockUpdateEvent parties parties today
