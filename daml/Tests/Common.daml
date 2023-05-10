@@ -104,6 +104,7 @@ preOrigination parties@(LedgerParties{..}) = do
     -- USD instrument definition
     let usdInstrument = mkUsd fed 
 
+    log "-- Creating factories and routes --"
     -- Create Factories
     accountFactoryCid <- accountFactory fed $ allParties parties
     holdingFactoryCid <- holdingFactory fed $ allParties parties
@@ -116,10 +117,10 @@ preOrigination parties@(LedgerParties{..}) = do
       , ("USD", fed)
       ]
 
+    log "-- Creating accounts --"
     let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
     let makeLoanAccount = makeAccount "Loan" accountFactoryCid holdingFactoryCid
 
-    log "-- Creating accounts --"
     -- Hortense's USD account
     (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense 100_000_000.00
     -- Hortense's loan account
