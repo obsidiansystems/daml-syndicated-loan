@@ -219,6 +219,7 @@ data PreOriginationStuff = PreOriginationStuff with
   hortenseCashHoldingCid : ContractId HoldingBase.I
   garyCashHoldingCid : ContractId HoldingBase.I
   aliceCashHoldingCid : ContractId HoldingBase.I
+  charlieCashHoldingCid : ContractId HoldingBase.I
 
 -- | Only a subset of the parties involved need to have accounts
 -- to exercise the lifecycle of the loan.
@@ -234,6 +235,7 @@ data LedgerAccounts = LedgerAccounts with
     garyBondAccount : AccountKey
     hortenseAccount : AccountKey
     hortenseBondAccount : AccountKey
+    charlieBondAccount : AccountKey
   deriving (Show, Eq, Ord)
 
 -- Pre-origination set-up script that creates:
@@ -399,6 +401,19 @@ preOrigination LedgerParties{..} = do
         amount = 6_000_000_000.00
 
     charlieCashHoldingCid <- submit fed_ingrid do exerciseCmd charlieRequestCid CreditAccount.Accept
+    -- Charlies's bond account (request)
+    charlieBondAccountRequestCid <- submit agent_charlie do
+      createCmd CreateAccount.Request with
+        custodian = borrower_alice
+        owner = agent_charlie
+    -- Hortense's bond account (accept)
+    charlieBondAccount <- submit borrower_alice do
+      exerciseCmd charlieBondAccountRequestCid CreateAccount.Accept with
+          label = "CharlieBond@Bank"
+          description = "Account for Charlie's holding of Alice's Bond at Bank"
+          accountFactoryCid = accountFactoryCid
+          holdingFactoryCid = holdingFactoryCid
+          observers = [borrower_alice]
 
     -- ...for Debbie's agency
     debbieRequestCid <- submit agent_debbie do
@@ -420,6 +435,7 @@ preOrigination LedgerParties{..} = do
       hortenseCashHoldingCid
       garyCashHoldingCid
       aliceCashHoldingCid
+      charlieCashHoldingCid
 
 data Origination = Origination with
   loanAgreement : OriginatedLoanAgreement
@@ -493,15 +509,15 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
       createCmd IntermediatedStatic with
         provider = agent_charlie
-        observers = Set.fromList [borrower_alice, lender_gary]
+        observers = Set.fromList [borrower_alice, lender_gary, lender_hortense, agent_charlie]
         paths = Map.fromList
           [ ("LoanInstrument", Hierarchy with
               rootCustodian = borrower_alice
-              pathsToRootCustodian = [[lender_gary]]
+              pathsToRootCustodian = [[lender_gary], [lender_hortense], [agent_charlie]]
             )
           , ("USD", Hierarchy with
               rootCustodian = fed_ingrid
-              pathsToRootCustodian = [[borrower_alice], [lender_gary]]
+              pathsToRootCustodian = [[borrower_alice], [lender_gary], [lender_hortense], [agent_charlie]]
             )
           ]
 
@@ -509,7 +525,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
     createCmd Factory with
       provider = agent_charlie
-      observers = Set.fromList [borrower_alice,lender_gary]
+      observers = Set.fromList [borrower_alice,lender_gary, lender_hortense, agent_charlie]
   
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   now <- getTime
@@ -648,7 +664,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         paths = Map.fromList
           [ ("LoanInstrument", Hierarchy with
               rootCustodian = borrower_alice
-              pathsToRootCustodian = [[lender_gary], [lender_hortense]]
+              pathsToRootCustodian = [[lender_gary], [lender_hortense], [agent_charlie]]
             )
           , ("USD", Hierarchy with
               rootCustodian = fed_ingrid
@@ -716,6 +732,8 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         [ ((lender_gary, bondCurrency), Some preOriginationStuff.garyCashHoldingCid)
         , ((lender_hortense, bondCurrency), Some preOriginationStuff.hortenseCashHoldingCid)
         , ((borrower_alice, bondKey), Some aliceBondHoldingKey)
+        , ((agent_charlie, bondCurrency), Some preOriginationStuff.charlieCashHoldingCid)
+        -- , ((agent_charlie, bondKey), Some preOriginationStuff.ledgerAccounts.charlieBondAccount)
         ]
 
       f (accum, map') (icid, routedStep) = do
@@ -725,11 +743,10 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         case optionalReceiverHoldingCid  of
           None -> fail $ "Could not find Holding for " <> show key'
           Some None -> fail $ "Insufficient funds for " <> show key'
-          Some (Some (receiverCashHoldingCid, receiverBondHoldingAcc)) -> do
+          Some (Some receiverHoldingCid) -> do
             SplitResult{splitCids, rest} <- submit key' do
               -- Check to make sure routedStep is a step dealing with USD Accounts or Bond Accounts
-              let accountInUse = if routedStep.quantity.unit == usdInstrument then receiverCashHoldingCid else receiverBondHoldingAcc
-              exerciseCmd (coerceInterfaceContractId @Fungible accountInUse) Fungible.Split with
+              exerciseCmd (coerceInterfaceContractId @Fungible receiverHoldingCid) Fungible.Split with
                 amounts = [routedStep.quantity.amount]
             debug $ "splitCids: " <> show splitCids
             debug $ "rest: " <> show rest
@@ -761,6 +778,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         , ((lender_hortense, bondCurrency), preOriginationStuff.ledgerAccounts.hortenseAccount)
 
         , ((agent_charlie, bondCurrency), preOriginationStuff.ledgerAccounts.charlieAccount)
+        , ((agent_charlie, bondKey), preOriginationStuff.ledgerAccounts.charlieBondAccount)
 
         , ((agent_debbie, bondCurrency), preOriginationStuff.ledgerAccounts.debbieAccount)
         ]
