@@ -116,7 +116,6 @@ preOrigination parties@(LedgerParties{..}) = do
       , ("USD", fed)
       ]
 
-    let makeBondAccount = makeAccount "Bond" accountFactoryCid holdingFactoryCid
     let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
     let makeLoanAccount = makeAccount "Loan" accountFactoryCid holdingFactoryCid
 
@@ -131,9 +130,6 @@ preOrigination parties@(LedgerParties{..}) = do
     -- Gary's loan account
     garyLoanAccount <- makeLoanAccount lender_gary borrower_alice
 
-    -- Gary's bond account
-    garyBondAccount <- makeBondAccount lender_gary borrower_alice
-
     -- ...for Alice's Company
     -- Bob's USD account
     (bobAccount, None) <- mkCashAccount borrower_bob 0.0
@@ -143,13 +139,9 @@ preOrigination parties@(LedgerParties{..}) = do
     -- Alices's loan account
     aliceLoanAccount <- makeLoanAccount borrower_alice borrower_alice
 
-    -- Alices's bond account (request)
-    aliceBondAccount <- makeBondAccount borrower_alice borrower_alice
-
     -- ...for Charlie's agency
     (charlieAccount, Some charlieCashHoldingCid) <- mkCashAccount agent_charlie 6_000_000_000.00
     -- Charlies's bond account (request)
-    charlieBondAccount <- makeBondAccount agent_charlie borrower_alice
     charlieLoanAccount <- makeLoanAccount agent_charlie borrower_alice
 
     -- Debbie's USD account
