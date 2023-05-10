@@ -28,18 +28,22 @@ template SettlementProposal
     routeProviderCid : ContractId RouteProvider.I
     settlementFactoryCid : ContractId Settlement.F
     bond : InstrumentKey
+    settled : Bool -- Has the 'Settle' been exercised already?
   where
     signatory loan.agreement.borrower :: sigAccumulator
     observer loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
 
-    nonconsuming choice Settle : (ContractId Batch.I, [ContractId Instruction.I])
-      controller loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+    choice Settle : (ContractId SettlementProposal, (ContractId Batch.I, [ContractId Instruction.I]))
+      controller loan.agreement.borrower
       do
         let allParties = loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+        assertMsg "Already settled" $ not settled
         assertMsg ("Missing signatures. Expected: " <> show allParties <> ", found: " <> show sigAccumulator) $
           sort sigAccumulator == sort allParties
         let id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
-        settleTransactions loan.agreement allParties id routeProviderCid settlementFactoryCid bond
+        newCid <- create this with settled = True
+        res <- settleTransactions loan.agreement allParties id routeProviderCid settlementFactoryCid bond
+        pure (newCid, res)
 
     choice Add_Signature : ContractId SettlementProposal
       with

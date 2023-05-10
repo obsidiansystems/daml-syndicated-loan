@@ -507,6 +507,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       routeProviderCid
       settlementFactoryCid
       bond = origination.loanAgreement.bondKey
+      settled = False
 
   -- Create a bond holding request
   aliceBondRequestCid <- submit borrower_alice do
@@ -528,12 +529,12 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
     exerciseCmd settlementProposalCid2 $ Add_Signature lender_gary
 
   -- Get sig of participating borrower
-  allSignatureSettlementCid <- submit borrower_alice do
+  settlementProposalCid4 <- submit borrower_alice do
     exerciseCmd settlementProposalCid3 $ Add_Signature borrower_alice
 
   -- Settle
-  (batchCid, instructionCids) <- submit borrower_alice do
-    exerciseCmd allSignatureSettlementCid Settle
+  (allSignatureSettlementCid, (batchCid, instructionCids)) <- submit borrower_alice do
+    exerciseCmd settlementProposalCid4 Settle
 
   -- Prepare to construct Allocate instructions
   -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids
