@@ -1,0 +1,20 @@
+-- | Accounts used in testing
+module Scripts.Accounts where
+
+import Daml.Finance.Interface.Types.Common.Types (AccountKey)
+
+-- | Only a subset of the parties involved need to have accounts
+-- to exercise the lifecycle of the loan.
+-- In particular, the depository/issuer, and underwriters do not
+-- need accounts.
+data LedgerAccounts = LedgerAccounts with
+    aliceAccount : AccountKey
+    aliceBondAccount : AccountKey
+    bobAccount : AccountKey
+    charlieAccount : AccountKey
+    debbieAccount : AccountKey
+    garyAccount : AccountKey -- Cash account
+    garyBondAccount : AccountKey
+    hortenseAccount : AccountKey
+    hortenseBondAccount : AccountKey
+  deriving (Show, Eq, Ord)

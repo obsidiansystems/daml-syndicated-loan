@@ -1,0 +1,32 @@
+-- | Helper script to set up parties on the ledger for testing
+module Scripts.Parties where
+
+import Daml.Script
+
+-- | Parties representing various agents in the syndicated loan workflow
+-- Each type of agent has two representatives so that we can test disclosure
+-- and divulgence.
+data LedgerParties = LedgerParties with
+    borrower_alice : Party
+    borrower_bob : Party
+    agent_charlie : Party
+    agent_debbie : Party
+    underwriter_emma : Party
+    underwriter_fred : Party
+    lender_gary : Party
+    lender_hortense : Party
+    fed_ingrid : Party
+  deriving (Show, Eq, Ord)
+
+createParties : Script LedgerParties
+createParties = do
+  borrower_alice <- allocateParty "Borrower_Alice"
+  borrower_bob <- allocateParty "Borrower_Bob"
+  agent_charlie <- allocateParty "Agent_Charlie"
+  agent_debbie <- allocateParty "Agent_Debbie"
+  underwriter_emma <- allocateParty "Underwriter_Emma"
+  underwriter_fred <- allocateParty "Underwriter_Fred"
+  lender_gary <- allocateParty "Lender_Gary"
+  lender_hortense <- allocateParty "Lender_Hortense"
+  fed_ingrid <- allocateParty "Fed_Ingrid"
+  pure $ LedgerParties { .. }

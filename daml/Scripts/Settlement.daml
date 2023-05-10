@@ -18,6 +18,7 @@ import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..))
 import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
 import Daml.Finance.Settlement.Batch qualified as B
 
+import Scripts.Parties
 import Tests.Common
 import Tests.IDE
 import Util.Display

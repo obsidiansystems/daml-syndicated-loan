@@ -14,6 +14,7 @@ module Workflow.Origination
   , LoanApplicationSubmission(..)
   , LoanApplicationData(..)
   , LoanApplicationProcess_CreateUnderwritingRequest(..)
+  , LoanApplicationProcess_OfferMandateLetter(..)
   , LoanApplicationSubmission_Accept(..)
   , MakeFundingRequest(..)
   , MandateLetterOffer_Accept(..)
@@ -28,7 +29,6 @@ module Workflow.Origination
   , UnderwritingRequest(..)
   , UnderwritingResult(..)
   , UnderwritingResult_Disclose(..)
-  , UnderwritingResult_OfferMandateLetter(..)
   )
   where
 
@@ -41,7 +41,8 @@ import DA.Set qualified as Set
 import DA.Text qualified as T
 
 import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule
-import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument(..))
+import Daml.Finance.Interface.Instrument.Bond.FixedRate.Types (FixedRate(..))
+import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate
 import Daml.Finance.Interface.Instrument.Base.Instrument qualified as BaseInstrument
 import Daml.Finance.Interface.Lifecycle.Effect (Effect(..))
 import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim
@@ -172,11 +173,30 @@ template LoanApplicationProcess
 
       do
         fetchedApplication <- fetch applicationCid
-        assertMsg "Application does data does not match accepted application" $ application == fetchedApplication
+        assertMsg "Application data does not match accepted application" $ application == fetchedApplication
         create UnderwritingRequest with
           underwriter
           application
           applicationCid
+
+    nonconsuming choice LoanApplicationProcess_OfferMandateLetter : ContractId MandateLetterOffer
+      with
+        reportCid : ContractId UnderwritingResult
+      controller application.agent
+      do
+        report <- fetch reportCid
+        assertMsg "Report application does not match accepted application" $ report.application == this.application
+        assertMsg "Report application cid does not match accepted application cid" $ report.applicationCid == this.applicationCid
+        create MandateLetterOffer with
+          agent = application.agent
+          borrower = application.borrower
+          applicationCid
+          reportCid
+          mandateLetter = MandateLetter with
+            instrument = report.report.instrument
+            amount = report.report.amount
+            durationYears = report.report.durationYears
+            prospectus = report.report.prospectus
 
 template UnderwritingRequest
   with
@@ -226,21 +246,6 @@ template UnderwritingResult
     key (underwriter, application.agent, application.uuid) : (Party, Party, Text)
     maintainer key._1
 
-    nonconsuming choice UnderwritingResult_OfferMandateLetter : ContractId MandateLetterOffer
-      controller application.agent
-      do
-        assertMsg "Cannot offer a mandate letter for a declined underwriting" $ result
-        create MandateLetterOffer with
-          agent = application.agent
-          borrower = application.borrower
-          applicationCid
-          reportCid = self
-          mandateLetter = MandateLetter with
-            instrument = report.instrument
-            amount = report.amount
-            durationYears = report.durationYears
-            prospectus = report.prospectus
-      
     nonconsuming choice UnderwritingResult_Disclose : ContractId UnderwritingDisclosure
       with
         disclose_to : Party
@@ -509,16 +514,16 @@ template PendingLoanAgreement
       with
         now : Time
         routeProviderCid : ContractId RouteProvider.I
-        settlementFactoryCid : ContractId Settlement.F   
+        settlementFactoryCid : ContractId Settlement.F
+        fixedRateBondFactoryCid : ContractId FixedRate.F
       controller agreement.agent
       do
-        let bondInstrument = loanAgreementToBond now this.agreement.loanTerms.instrument this.agreement
-        bondCid <- create bondInstrument
-        let bondCid' = toInterfaceContractId @BaseInstrument.I bondCid
+        let bondInstrument = loanAgreementToBondCreate now this.agreement.loanTerms.instrument this.agreement
+        bondCid <- exercise fixedRateBondFactoryCid bondInstrument
         bondKey <- createReference
-          bondCid'
-          bondInstrument.depository
-          bondInstrument.issuer
+          bondCid
+          bondInstrument.fixedRate.instrument.depository
+          bondInstrument.fixedRate.instrument.issuer
           bondInstrument.observers
         let agent = agreement.agent
             borrower = agreement.borrower
@@ -558,7 +563,7 @@ template OriginatedLoanAgreement
     agreement : LoanAgreement
     bondInstrument : BondInstrument
     bondKey : InstrumentKey
-    bondCid : ContractId BondInstrument
+    bondCid : ContractId BaseInstrument.I
     routeProviderCid : ContractId RouteProvider.I
     settlementFactoryCid : ContractId Settlement.F
     lifecycleRule : ContractId Lifecycle.Lifecycle
@@ -590,27 +595,29 @@ template OriginatedLoanAgreement
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
 -- NOTE: pays to agent for now. TODO: pay to participants
-loanAgreementToBond
+loanAgreementToBondCreate
   :  Time -- Current time
   -> InstrumentKey -- USD
   -> LoanAgreement
-  -> BondInstrument
-loanAgreementToBond now usd a =
+  -> FixedRate.Create
+loanAgreementToBondCreate now usd a =
   let numberOfParticipants = Map.size a.participantsWithAmounts
-  in Instrument with
-    depository = a.borrower -- a.agent -- TODO: A bit odd
-    issuer = a.borrower
-    id = Id a.uuid
-    version = "0"
-    description = "Fixed-rate bond"
-    couponRate = unRatePerAnnum a.loanTerms.rate
-    periodicSchedule = schedule
-    holidayCalendarIds = [] -- NOT USED!
-    calendarDataProvider = a.agent -- NOT USED!
-    dayCountConvention = Act365Fixed -- TODO: how does this impact servicing rules?
-    currency = usd
+  in FixedRate.Create with
+    fixedRate = FixedRate with
+      instrument = InstrumentKey with
+        depository = a.borrower -- a.agent -- TODO: A bit odd
+        issuer = a.borrower
+        id = Id a.uuid
+        version = "0"
+      description = "Fixed-rate bond"
+      couponRate = unRatePerAnnum a.loanTerms.rate
+      periodicSchedule = schedule
+      holidayCalendarIds = [] -- NOT USED!
+      calendarDataProvider = a.agent -- NOT USED!
+      dayCountConvention = Act365Fixed -- TODO: how does this impact servicing rules?
+      currency = usd
+      lastEventTimestamp = now
     observers = Map.fromList [("lenders", Set.fromList (Map.keys a.participantsWithAmounts)), ("agent", Set.singleton a.agent)]
-    lastEventTimestamp = now
   where
     startDate = toDateUTC now
 

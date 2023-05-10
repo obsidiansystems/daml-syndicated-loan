@@ -9,11 +9,11 @@ module Workflow.Util
 import DA.Map (Map)
 import Daml.Script
 
-import Daml.Finance.Instrument.Bond.FixedRate.Instrument (Instrument)
+import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate
 import Daml.Finance.Interface.Instrument.Base.Instrument qualified as BaseInstrument
 import Daml.Finance.Interface.Types.Common.Types (Parties, InstrumentKey(..))
 
-type BondInstrument = Daml.Finance.Instrument.Bond.FixedRate.Instrument.Instrument
+type BondInstrument = FixedRate.Create
 
 createReference : ContractId BaseInstrument.I -> Party -> Party -> Map Text Parties -> Update InstrumentKey
 createReference cid depository issuer observers = do
@@ -33,27 +33,27 @@ createReferenceS cid depository issuer observers = do
 
 data Bond = Bond
   with
-    instrument : BondInstrument
+    instrument : FixedRate.Create
     reference : InstrumentKey
-    cid : ContractId Instrument
+    cid : ContractId BaseInstrument.Instrument
   deriving (Eq, Show)
 
-createBond : BondInstrument -> Update Bond
-createBond instrument = do
-  cid <- create instrument
+createBond : ContractId FixedRate.Factory -> FixedRate.Create -> Update Bond
+createBond factory instrument = do
+  cid <- exercise factory instrument
   let cid' = toInterfaceContractId @BaseInstrument.I cid
-  reference <- createReference cid' instrument.depository instrument.issuer instrument.observers
+  reference <- createReference cid' instrument.fixedRate.instrument.depository instrument.fixedRate.instrument.issuer instrument.observers
   return Bond with
     instrument
     reference
     cid
 
-createBondS : BondInstrument -> Script Bond
-createBondS instrument = do
-  cid <- submit instrument.depository do
-    createCmd instrument
+createBondS : ContractId FixedRate.Factory -> FixedRate.Create -> Script Bond
+createBondS factory instrument = do
+  cid <- submit instrument.fixedRate.instrument.depository do
+    exerciseCmd factory instrument
   let cid' = toInterfaceContractId @BaseInstrument.I cid
-  reference <- createReferenceS cid' instrument.depository instrument.issuer instrument.observers
+  reference <- createReferenceS cid' instrument.fixedRate.instrument.depository instrument.fixedRate.instrument.issuer instrument.observers
   return Bond with
     instrument
     reference
