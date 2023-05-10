@@ -49,6 +49,9 @@ import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge)
 import qualified Daml.Finance.Interface.Settlement.Batch as Batch
 import DA.List.Total (head)
 import DA.Optional (fromSome, isSome)
+import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
+import qualified DA.Set as Set
+import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
 
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
@@ -296,9 +299,8 @@ preOrigination LedgerParties{..} = do
       aliceCashHoldingCid
 
 data Origination = Origination with
-  loanAgreement : LoanAgreement
-  loanAgreementCid : ContractId LoanAgreement
-  bond : Bond
+  loanAgreement : OriginatedLoanAgreement
+  loanAgreementCid : ContractId OriginatedLoanAgreement
   aliceBondAccountKey : AccountKey
   garyBondAccountKey : AccountKey
   garyBondHoldingKey : ContractId B.I
@@ -350,9 +352,41 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     (Map.keys fundingSelection_selected)
   -- Agent declines leftover funding interests
   submit agent_charlie $ forA_ fundingSelection_declined $ \declinedCid -> exerciseCmd declinedCid FundingInterest_Decline
+  
+  
+  -- Agent creates a route provider explaining how payments should flow between involved parties
+  routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit agent_charlie do
+      createCmd IntermediatedStatic with
+        provider = agent_charlie
+        observers = Set.fromList [borrower_alice, lender_gary]
+        paths = Map.fromList
+          [ ("LoanInstrument", Hierarchy with
+              rootCustodian = borrower_alice
+              pathsToRootCustodian = [[lender_gary]]
+            )
+          , ("USD", Hierarchy with
+              rootCustodian = fed_ingrid
+              pathsToRootCustodian = [[borrower_alice], [lender_gary]]
+            )
+          ]
+
+  -- Agent creates a settlement factory
+  settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
+    createCmd Factory with
+      provider = agent_charlie
+      observers = Set.fromList [borrower_alice,lender_gary]
+  
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
-  (loanAgreementCid, bond) <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+  now <- getTime
+  loanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+    with
+      now
+      routeProviderCid
+      settlementFactoryCid
+
   Some loanAgreement <- queryContractId agent_charlie loanAgreementCid
+
+  let bondKey = loanAgreement.bondKey
 
   aliceAccountRequestCid <- submit borrower_alice do
     createCmd CreateAccount.Request with
@@ -370,8 +404,8 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   aliceBondRequestCid <- submit borrower_alice do
     createCmd CreditAccount.Request with
       account = ledgerAccounts.aliceAccount
-      instrument = bond.reference
-      amount = loanAgreement.loanTerms.amount
+      instrument = bondKey
+      amount = loanAgreement.agreement.loanTerms.amount
 
   aliceBondHoldingKey <- submit fed_ingrid do
     exerciseCmd aliceBondRequestCid CreditAccount.Accept
@@ -392,8 +426,8 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   bondTransferReq <- submit lender_gary do
     createCmd Transfer.Request with
       receiverAccount = garyBondAccountKey
-      instrument = bond.reference
-      amount = loanAgreement.loanTerms.amount
+      instrument = bondKey
+      amount = loanAgreement.agreement.loanTerms.amount
       currentOwner = borrower_alice
 
   garyBondHoldingKey <- submit borrower_alice do
@@ -403,7 +437,6 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
   pure Origination with
     loanAgreement
     loanAgreementCid
-    bond
     aliceBondAccountKey
     garyBondAccountKey
     garyBondHoldingKey
@@ -540,14 +573,14 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
       sigAccumulator = []
       routeProviderCid
       settlementFactoryCid
-      bond = origination.bond.reference
+      bond = origination.loanAgreement.bondKey
 
   -- Create a bond holding request
   aliceBondRequestCid <- submit borrower_alice do
     createCmd CreditAccount.Request with
       account = preOriginationStuff.ledgerAccounts.aliceAccount
-      instrument = origination.bond.reference
-      amount = origination.loanAgreement.loanTerms.amount
+      instrument = origination.loanAgreement.bondKey
+      amount = origination.loanAgreement.agreement.loanTerms.amount
 
   -- Create a bond holding held by Alice
   aliceBondHoldingKey <- submit fed_ingrid do

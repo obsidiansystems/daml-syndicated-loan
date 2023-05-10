@@ -150,13 +150,11 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
   settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit borrower do
     createCmd Factory with
       provider = borrower
-      observers = Set.fromList [borrower]
-
+      observers = Set.fromList [borrower,lender]
 
   orig <- origination (LedgerParties{..}) (PreOriginationStuff{..})
   now <- getTime
-
-  result <- submit agent_charlie $ exerciseCmd (toInterfaceContractId @C.Claim orig.bond.cid) C.GetClaims with actor = agent_charlie
+  result <- submit agent_charlie $ exerciseCmd (toInterfaceContractId @C.Claim orig.loanAgreement.bondCid) C.GetClaims with actor = agent_charlie
   debug $ show result
 
   let (y',m',d') = toGregorian (toDateUTC now)
@@ -193,7 +191,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       instrument = orig.bond.reference
       observableCids = []
 
-  claimResult <- submitMulti [agent, borrower, lender] [] $
+  claimResult <- submit lender $
     exerciseCmd claimRule ClaimI.ClaimEffect with
       claimer = lender
       holdingCids = [orig.garyBondHoldingKey]

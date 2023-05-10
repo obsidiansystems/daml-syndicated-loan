@@ -1,5 +1,8 @@
 module Workflow.Origination where
 
+import Workflow.Servicing
+import Workflow.Util
+
 import DA.Date (date, toGregorian, addDays, toDateUTC)
 import DA.Map (Map)
 import qualified DA.Map as Map
@@ -12,10 +15,18 @@ import Daml.Finance.Interface.Types.Date.DayCount (DayCountConventionEnum(..))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y), RollConventionEnum(..), Period(..))
 import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), ScheduleFrequency(..), PeriodicSchedule(..))
 import qualified Daml.Finance.Interface.Instrument.Base.Instrument as BaseInstrument
-
-import Workflow.Util
 import qualified Daml.Finance.Interface.Types.Date.Calendar as Cal
 import qualified Daml.Finance.Interface.Types.Date.Schedule as Sched
+import qualified Daml.Finance.Interface.Lifecycle.Rule.Lifecycle as Lifecycle
+import qualified Daml.Finance.Claims.Lifecycle.Rule as LifecycleRule
+import qualified Daml.Finance.Interface.Lifecycle.Rule.Claim as ClaimI
+import qualified Daml.Finance.Lifecycle.Rule.Claim as Claim
+import qualified Daml.Finance.Interface.Settlement.RouteProvider as RouteProvider
+import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
+import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
+import qualified Daml.Finance.Interface.Settlement.Factory as Settlement
+import Daml.Finance.Settlement.Factory (Factory(..))
+
 
 -- ### TODO
 --   * Include "start date" of the loan (used to calculate coupon payment dates)
@@ -300,15 +311,76 @@ template PendingLoanAgreement
       do
         create this with
           signed = signer :: (this.signed)
-    choice PendingLoanAgreement_Finalize : (ContractId LoanAgreement, Bond)
+    choice PendingLoanAgreement_Finalize : ContractId OriginatedLoanAgreement
+      with
+        now : Time
+        routeProviderCid : ContractId RouteProvider.I
+        settlementFactoryCid : ContractId Settlement.F   
       controller agreement.agent
       do
-        a <- create this.agreement
-        now <- getTime -- TODO: reconsider if this is appropriate
-        debug $ show this.agreement
-        let bond = loanAgreementToBond now this.agreement.loanTerms.instrument this.agreement
-        b <- createBond bond
-        return (a,b)
+        let bondInstrument = loanAgreementToBond now this.agreement.loanTerms.instrument this.agreement
+        bondCid <- create bondInstrument
+        let bondCid' = toInterfaceContractId @BaseInstrument.I bondCid
+        bondKey <- createReference
+          bondCid'
+          bondInstrument.depository
+          bondInstrument.issuer
+          bondInstrument.observers
+
+        create OriginatedLoanAgreement with
+          agreement = this.agreement
+          bondInstrument
+          bondKey
+          bondCid
+          routeProviderCid
+          settlementFactoryCid
+
+template OriginatedLoanAgreement
+  with
+    agreement : LoanAgreement
+    bondInstrument : BondInstrument
+    bondKey : InstrumentKey
+    bondCid : ContractId BondInstrument
+    routeProviderCid : ContractId RouteProvider.I
+    settlementFactoryCid : ContractId Settlement.F
+  where
+    signatory agreement.agent, agreement.borrower, Map.keys agreement.participantsWithAmounts
+    ensure sum (Map.values agreement.participantsWithAmounts) == agreement.loanTerms.amount
+
+    nonconsuming choice EnactLifecycling : ()
+      with today : Date
+      controller agreement.agent
+      do
+        let agent = agreement.agent
+            borrower = agreement.borrower
+            lenders = Map.keys agreement.participantsWithAmounts
+            lenderSet = Set.fromList lenders
+        
+        let parties = Set.fromList (signatory this)
+            updateEvent = clockUpdateEvent parties parties today
+        updateEventCid <- toInterfaceContractId <$> create updateEvent
+        lifecycleRule <- fmap (toInterfaceContractId @Lifecycle.Lifecycle) $
+          create $ LifecycleRule.Rule with
+            providers = Set.fromList [borrower]
+            observers = Map.empty
+            lifecycler = agent
+            id = Id "LifecycleRule"
+            description = "Rule to lifecycle the bond instrument"
+        claimRule <- fmap (toInterfaceContractId @ClaimI.I) $
+          create $ Claim.Rule with
+            providers = Set.fromList [borrower]
+            claimers = lenderSet
+            settlers = Set.union (Set.fromList [borrower, agent]) lenderSet
+            routeProviderCid
+            settlementFactoryCid
+            netInstructions = False
+        (newBondOpt, [effectCid]) <-
+          exercise lifecycleRule Lifecycle.Evolve with
+            eventCid = updateEventCid
+            instrument = bondKey
+            observableCids = []
+
+        return ()
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 
