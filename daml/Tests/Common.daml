@@ -129,7 +129,7 @@ preOrigination parties@(LedgerParties{..}) = do
     settlementFactoryCid <- toInterfaceContractId @Settlement.F <$> submit agent_charlie do
       createCmd Settlement.Factory with
         provider = agent_charlie
-        observers = Set.fromList [borrower_alice, borrower_bob]
+        observers = Set.fromList [borrower_alice, borrower_bob, lender_gary, lender_hortense]
 
     -- Create Route Provider
     routeProviderCid <- toInterfaceContractId @RouteProvider.I <$> submit borrower_alice do
