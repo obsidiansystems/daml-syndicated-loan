@@ -12,10 +12,6 @@ import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (Allocate(..), Approve(..))
 import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
 import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
-import Daml.Finance.Interface.Types.Date.Calendar qualified as Cal
-import Daml.Finance.Interface.Types.Date.RollConvention (Period(..), PeriodEnum(..), RollConventionEnum(..))
-import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..))
-import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
 import Daml.Finance.Settlement.Batch qualified as B
 
 import Scripts.Parties
@@ -37,35 +33,6 @@ data SettlementState = SettlementState
     bondInstrument : InstrumentKey
     bobHoldingCid : ContractId Holding.I
   deriving (Eq, Show)
-
--- | Create a schedule for periodic payments.
-createPaymentPeriodicSchedule : Date -> [Text] -> Cal.BusinessDayConventionEnum -> PeriodEnum ->
-  Int -> Date -> Date -> PeriodicSchedule
-createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConvention couponPeriod
-  couponPeriodMultiplier issueDate maturityDate = do
-    -- CREATE_PERIODIC_SCHEDULE_BEGIN
-    let
-      (y, m, d) = toGregorian firstCouponDate
-      periodicSchedule = PeriodicSchedule with
-        businessDayAdjustment =
-          Cal.BusinessDayAdjustment with
-            calendarIds = holidayCalendarIds
-            convention = businessDayConvention
-        effectiveDateBusinessDayAdjustment = None
-        terminationDateBusinessDayAdjustment = None
-        frequency =
-          Sched.Periodic Sched.Frequency with
-            rollConvention = DOM d
-            period = Period with
-              period = couponPeriod
-              periodMultiplier = couponPeriodMultiplier
-        effectiveDate = issueDate
-        firstRegularPeriodStartDate = Some firstCouponDate
-        lastRegularPeriodEndDate = Some maturityDate
-        stubPeriodType = None
-        terminationDate = maturityDate
-    -- CREATE_PERIODIC_SCHEDULE_END
-    periodicSchedule
 
 runCreateParties : Script LedgerParties
 runCreateParties = createParties
@@ -104,7 +71,6 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement
       now = orig.originationTime
   let (y',m',d') = toGregorian (toDateUTC now)
       today = date (y'+1) m' d'
-      parties = Set.fromList [borrower, lender, agent]
 
   lifecycleData <- submit agent $ exerciseCmd orig.loanAgreementCid OriginatedLoanAgreement_Lifecycle with
     today

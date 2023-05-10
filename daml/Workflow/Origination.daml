@@ -577,10 +577,6 @@ template OriginatedLoanAgreement
       with today : Date
       controller agreement.agent
       do
-        let agent = agreement.agent
-            borrower = agreement.borrower
-            lenders = Map.keys agreement.participantsWithAmounts
-            lenderSet = Set.fromList lenders        
         let parties = Set.fromList (signatory this)
             updateEvent = clockUpdateEvent parties parties today
         updateEventCid <- toInterfaceContractId <$> create updateEvent
@@ -601,8 +597,7 @@ loanAgreementToBondCreate
   -> LoanAgreement
   -> FixedRate.Create
 loanAgreementToBondCreate now usd a =
-  let numberOfParticipants = Map.size a.participantsWithAmounts
-  in FixedRate.Create with
+  FixedRate.Create with
     fixedRate = FixedRate with
       instrument = InstrumentKey with
         depository = a.borrower -- a.agent -- TODO: A bit odd
