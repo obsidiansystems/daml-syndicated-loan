@@ -373,7 +373,7 @@ preOrigination LedgerParties{..} = do
       createCmd CreditAccount.Request with
         account = aliceAccount
         instrument = usdInstrument
-        amount = 501_369.863
+        amount = 250_684.9315
 
     aliceCashHoldingCid <- submit fed_ingrid do exerciseCmd aliceRequestCid CreditAccount.Accept
 
@@ -763,7 +763,9 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
     forA settlementParties (query @FungibleX.Fungible)
 
   let settlementFungibleMap : Map.Map Party [(ContractId FungibleX.Fungible, FungibleX.Fungible)] -- Owner to fungibles
-      settlementFungibleMap = createFungiblesMap fungibles
+      settlementFungibleMap =
+        createFungiblesMap
+          (map head $ groupOn fst $ sortOn fst fungibles) -- We need to do deduplicate since a "query" by two different parties may return the same contract (if it's visible by multiple parties)
 
   debugRaw $ "settlementFungibleMap: " <> show settlementFungibleMap
 
