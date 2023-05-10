@@ -1,4 +1,8 @@
-module Workflow.Transfer where
+module Workflow.Transfer
+  ( Request(..)
+  , Accept(..)
+  )
+  where
 
 import DA.Set (fromList)
 
