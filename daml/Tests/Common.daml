@@ -686,7 +686,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
             debug $ "splitCids: " <> show splitCids
             debug $ "rest: " <> show rest
             assertMsg "we only split a single amount" $ Prelude.length splitCids == 1
-            let Some splitCid = head splitCids
+            let Some splitCid = Some (L.head splitCids)
                 newMap = Map.insert key' (coerceInterfaceContractId @B.Base <$> rest) map'
 
             allocInstructions <- submit key' do
