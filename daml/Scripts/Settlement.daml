@@ -8,7 +8,7 @@ import qualified DA.Set as Set
 import DA.Time (time)
 
 import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule (Rule(..))
-import Daml.Finance.Interface.Holding.Base qualified as Holding (I)
+import Daml.Finance.Interface.Holding.Base qualified as Holding (I, Base)
 import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (I, ClaimEffect(..))
 import Daml.Finance.Interface.Lifecycle.Rule.Lifecycle qualified as Lifecycle (Lifecycle, Evolve(..))
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
@@ -94,9 +94,9 @@ runOrigination = do
 run : Script ()
 run = do
   setTime (time (date 2023 Apr 12) 4 4 4)
-  p <- createParties
-  po <- preOrigination p
-  runBondStep p po
+  (p, po, o) <- runOrigination
+  originationSettlement <- settleLoan p po o
+  runBondStep p po o originationSettlement
   return ()
 
 -- | Test script that
@@ -105,8 +105,8 @@ run = do
 -- 3. credits a token holding to Alice in her bank account
 -- 4. atomically exchanges the token against the cash holding
 
-runBondStep : LedgerParties -> PreOriginationStuff -> Script ()
-runBondStep LedgerParties{..} PreOriginationStuff{..} = do
+runBondStep : LedgerParties -> PreOriginationStuff -> Origination -> OriginationSettlement -> Script ()
+runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement{..} = do
   let borrower = borrower_alice
       lender = lender_gary
       agent = agent_charlie
@@ -144,8 +144,6 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       provider = borrower
       observers = Set.fromList [borrower]
 
-
-  orig <- origination (LedgerParties{..}) (PreOriginationStuff{..})
   now <- getTime
 
   let (y',m',d') = toGregorian (toDateUTC now)
@@ -178,10 +176,11 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
       instrument = orig.bond.reference
       observableCids = []
 
+  let lenderGaryBondHoldingBase = toInterfaceContractId @Holding.Base lenderGaryBondHolding
   claimResult <- submitMulti [agent, borrower, lender] [] $
     exerciseCmd claimRule Claim.ClaimEffect with
       claimer = lender
-      holdingCids = [orig.garyBondHoldingKey]
+      holdingCids = [lenderGaryBondHoldingBase]
       effectCid
       batchId = Id "Loan interest payment"
 
@@ -190,7 +189,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
 
   (bondConsumed2, _) <- submit lender $ exerciseCmd bondConsumed Instruction.Allocate with
     actors = Set.fromList [lender]
-    allocation = Pledge orig.garyBondHoldingKey
+    allocation = Pledge lenderGaryBondHoldingBase
   submit_ borrower $ exerciseCmd bondConsumed2 Instruction.Approve with
     actors = Set.fromList [borrower]
     approval = DebitSender
@@ -200,7 +199,7 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} = do
     allocation = CreditReceiver
   submit_ lender $ exerciseCmd bondProduced2 Instruction.Approve with
     actors = Set.fromList [lender]
-    approval = TakeDelivery orig.garyBondAccountKey
+    approval = TakeDelivery ledgerAccounts.garyBondAccount
 
   (couponProduced2, _) <- submit borrower $ exerciseCmd couponProduced Instruction.Allocate with
     actors = Set.fromList [borrower]
