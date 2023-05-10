@@ -99,6 +99,12 @@ settleTransactions :
   -> InstrumentKey -- ^ Bond
   -> Update (a , [c])
 settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bondInstrumentKey = do
+  -- TODO: Add Step that will transfer Bond from (Borrower or Agent) to Lenders
+  -- TODO: incorporate use of agent in steps:
+      -- Agent create Bond/Delegation request for Borrower to Accept.
+      -- Lenders send funds to Agent.
+      -- Agent sends Bonds to Lenders.
+      -- Agent sends funds to Borrower.
   -- Settlement of lenders (USD)
   let stepsUsd = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
         Step with
