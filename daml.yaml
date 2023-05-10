@@ -52,3 +52,4 @@ scenario-service:
 build-options:
   - --target=1.15
   - --ghc-option=-Wall
+  - --ghc-option=-Wno-orphans

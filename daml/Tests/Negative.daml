@@ -22,8 +22,8 @@ import Tests.Common(LedgerParties(..), PreOriginationStuff(..))
 preoriginationTests : LedgerParties -> Script ()
 preoriginationTests LedgerParties{..} = do
     let usdInstrument = InstrumentKey with
-            issuer = fed_ingrid
-            depository = fed_ingrid
+            issuer = fed
+            depository = fed
             id = Id "USD"
             version = "0"
         falseInstrument = InstrumentKey with
@@ -32,25 +32,25 @@ preoriginationTests LedgerParties{..} = do
             id = Id "USD"
             version = "0"
 
-    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed_ingrid do
+    accountFactoryCid <- toInterfaceContractId @Account.F <$> submit fed do
         createCmd Account.Factory
           with
-            provider = fed_ingrid
+            provider = fed
             observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $ 
                 [borrower_alice, borrower_bob]
 
-    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed_ingrid do
+    holdingFactoryCid <- toInterfaceContractId @Holding.F <$> submit fed do
         createCmd Fungible.Factory with
-            provider = fed_ingrid
+            provider = fed
             observers = Map.fromList $ (::[]) $ ("observers",) $ Set.fromList $ 
                 [borrower_alice, borrower_bob]
 
     -- Infuse the lenders with capital
     -- ...for Hortenses's Bank
     hortenseRequestCid <- submit lender_hortense do
-      createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed_ingrid
+      createCmd CreateAccount.Request with owner = lender_hortense; custodian = fed
 
-    hortenseAccount <- submit fed_ingrid do
+    hortenseAccount <- submit fed do
       exerciseCmd hortenseRequestCid CreateAccount.Accept with
         label = "Hortense@Bank"
         description = "Account of Hortense at Bank"
@@ -64,7 +64,7 @@ preoriginationTests LedgerParties{..} = do
         instrument = usdInstrument
         amount = 100_000_000.00
 
-    hortenseCashHoldingCid <- submit fed_ingrid do exerciseCmd hortenseRequestCid CreditAccount.Accept
+    hortenseCashHoldingCid <- submit fed do exerciseCmd hortenseRequestCid CreditAccount.Accept
 
     pure ()
 
@@ -120,6 +120,7 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- To maintain the privacy of the underwriters and the lenders, Charlie kicks off a workflow not involving the borrower as a signatory
     -- Later on, we will ensure that the loan agreement corresponds with the application Alice submitted.
     aliceApplicationProcessCid <- testExercise ps agent_charlie aliceApplicationCid AcceptedLoanApplication_StartProcess
+    testVisibility ps [ agent_charlie ] aliceApplicationProcessCid
 
     -- Charlie submits alice's application to an underwriter— NO ONE else has
     -- the authority to do so.
@@ -143,6 +144,12 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- The report is only visible to the underwriter and the agent who requested it
     testVisibility ps [ agent_charlie, underwriter_emma ] aliceUnderwritingCid
 
+    -- With the report in hand, Charlie is prepared to make an offer to Alice.
+    --
+    -- NOTE: This emits a divulgence warning just as above. However, Alice can only seen the application process contract,
+    -- not anything underlying the underwriting process.
+    aliceMandateLetterOfferCid <- testExercise ps agent_charlie aliceApplicationProcessCid LoanApplicationProcess_OfferMandateLetter with
+        reportCid = aliceUnderwritingCid
 
     pure ()
 
@@ -155,6 +162,10 @@ partiesList (LedgerParties a b c d e f g h i) =
 -- | Given a contract and a set of parties who should be able to view the contract,
 -- confirms that this is the case and moreover, the other parties of the test script
 -- cannot see the contract.
+--
+-- Note that this tests visibility by *querying*. Fetching could still succeed if
+-- divulgence is in play. In order to test divulgence, we must attempt to exercise
+-- a contract or fetch it within a transaction.
 testVisibility
     : (HasTemplateTypeRep c, HasFromAnyTemplate c, HasToAnyTemplate c, HasAgreement c)
     => LedgerParties
