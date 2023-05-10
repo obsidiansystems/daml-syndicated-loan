@@ -324,7 +324,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
     borrowerSigned
     (Map.keys fundingSelection_selected)
   -- Agent declines leftover funding interests
-  submit agent_charlie $ forA_ fundingSelection_declined $ \declinedCid -> exerciseCmd declinedCid FundingInterest_Decline
+  forA_ fundingSelection_declined $ \declinedCid -> submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
   
   
   -- Agent creates a route provider explaining how payments should flow between involved parties
