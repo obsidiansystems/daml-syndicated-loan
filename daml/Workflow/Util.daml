@@ -1,4 +1,10 @@
-module Workflow.Util where
+module Workflow.Util
+  ( Bond(..)
+  , BondInstrument
+  , createBond
+  , createReference
+  )
+  where
 
 import DA.Map (Map)
 import Daml.Script

@@ -28,8 +28,7 @@ module Workflow.Origination
   )
   where
 
-import Workflow.Servicing
-import Workflow.Util
+import Prelude hiding (agreement, key)
 
 import DA.Date (date, toGregorian, toDateUTC)
 import DA.Map (Map)
@@ -54,6 +53,8 @@ import Daml.Finance.Interface.Types.Date.Schedule qualified as Sched
 import Daml.Finance.Lifecycle.Rule.Claim qualified as Claim
 
 import Util.Display
+import Workflow.Servicing
+import Workflow.Util
 
 -- ### TODO
 --   * Include "start date" of the loan (used to calculate coupon payment dates)
@@ -288,14 +289,14 @@ template UnderwritingDisclosure
 
     nonconsuming choice MakeFundingRequest : ContractId FundingRequest
       with
-        participant : Party
+        requestee : Party
       controller agent
       do
         create FundingRequest with
           agent = agent
           uuid = uuid
           totalApplicationAmount = report.amount
-          participant
+          participant = requestee
           underwrite = self
 
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
@@ -565,7 +566,7 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
   couponPeriodMultiplier issueDate maturityDate = do
     -- CREATE_PERIODIC_SCHEDULE_BEGIN
     let
-      (y, m, d) = toGregorian firstCouponDate
+      (_y, _m, d) = toGregorian firstCouponDate
       periodicSchedule = PeriodicSchedule with
         businessDayAdjustment =
           Cal.BusinessDayAdjustment with
