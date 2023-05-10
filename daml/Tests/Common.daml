@@ -6,7 +6,7 @@ module Tests.Common
   , initialTest
   , preOrigination
   , Origination(..)
-  , origination
+  , originationStep
   , settleLoan
   , selectFundingInterests
   , Config(..)
@@ -68,7 +68,7 @@ data Config = Config with
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
   preOriginationStuff <- preOrigination parties
-  originationResult : Origination <- origination parties preOriginationStuff
+  originationResult : Origination <- originationStep parties preOriginationStuff
   _originationSettlement <- settleLoan parties preOriginationStuff originationResult
   -- servicing parties originationData
   pure ()
@@ -206,8 +206,8 @@ createLoanApplication loanApplicationSubmission = do
   log loanApplicationSubmission
   pure application
 
-origination : LedgerParties -> PreOriginationStuff -> Script Origination
-origination LedgerParties{..} PreOriginationStuff{..} = do
+originationStep : LedgerParties -> PreOriginationStuff -> Script Origination
+originationStep LedgerParties{..} PreOriginationStuff{..} = do
   let amount = 10_000_000.00
       rate = RatePerAnnum 0.05 -- 5% per annum
       uuid = "LoanInstrument"
@@ -381,11 +381,6 @@ acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (Contract
 acceptLoanProposal borrower offerCid = do
   submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
-servicing : LedgerParties -> Origination -> Script ()
-servicing LedgerParties{..} origination = do
-
-  pure ()
-
 data OriginationSettlement = OriginationSettlement with
   borrowerAliceUsdHolding : NonEmpty (ContractId Fungible.Fungible)
   lenderGaryBondHolding : ContractId Fungible.Fungible
@@ -497,7 +492,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         ]
 
   -- Have each party approve of transaction instructions
-  approvedSettleInstuctionCids <- forA allocatedSettleInstructions $ \(approvingParty, (allocInstructionsCid, _)) -> do
+  approvedSettleInstructionCids <- forA allocatedSettleInstructions $ \(approvingParty, (allocInstructionsCid, _)) -> do
     Some allocInstructions <- queryContractId
       @Settlement.Instruction
       approvingParty
