@@ -121,6 +121,7 @@ template UnderwritingResult
           underwriter
           agent
           borrower
+          report = self
           mandateLetter = MandateLetter with
             instrument = report.instrument
             amount = report.amount
@@ -133,7 +134,8 @@ template UnderwritingResult
         mandateLetterCid : ContractId AcceptedMandateLetter
       controller agent
       do
-        _ <- fetch mandateLetterCid
+        letter <- fetch mandateLetterCid
+        assertMsg "Provided mandate letter was not for this underwriting report" $ letter.report == self
         create UnderwritingDisclosure with
           underwriter
           agent
@@ -164,6 +166,7 @@ template MandateLetterOffer
     agent : Party
     underwriter : Party
     borrower : Party
+    report : ContractId UnderwritingResult
     mandateLetter : MandateLetter
   where
     signatory agent, underwriter
@@ -182,6 +185,7 @@ template AcceptedMandateLetter
     agent : Party
     underwriter : Party
     borrower : Party
+    report : ContractId UnderwritingResult
     mandateLetter : MandateLetter
   where
     signatory agent, underwriter, borrower
