@@ -7,7 +7,6 @@ module Tests.Common
   , Origination(..)
   , origination
   , settleLoan
-  , Config(..)
   ) where
 
 {-
@@ -58,11 +57,6 @@ import Scripts.Accounts
 -- | Test that does not exercise the lending workflow as such, but
 -- exercises transfers on the ledger to help us estimate throughput
 -- of our settlement strategy.
-data Config = Config with
-  instrument : InstrumentKey
-  accountFactoryCid : ContractId Account.F
-  holdingFactoryCid : ContractId Holding.F
-
 initialTest : LedgerParties -> Script ()
 initialTest parties = do
   preOriginationStuff <- preOrigination parties
