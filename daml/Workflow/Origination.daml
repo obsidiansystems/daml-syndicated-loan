@@ -2,6 +2,7 @@ module Workflow.Origination where
 
 import DA.Date (date, toGregorian, addDays, toDateUTC)
 import DA.Map (Map)
+import qualified DA.Text as T
 import qualified DA.Map as Map
 import qualified DA.Set as Set
 
@@ -17,6 +18,7 @@ import Workflow.Util
 import qualified Daml.Finance.Interface.Types.Date.Calendar as Cal
 import qualified Daml.Finance.Interface.Types.Date.Schedule as Sched
 
+import Util.Display
 -- ### TODO
 --   * Include "start date" of the loan (used to calculate coupon payment dates)
 --      * Equal to the day at which the loan principal amount is transferred to the borrower.
@@ -28,6 +30,9 @@ import qualified Daml.Finance.Interface.Types.Date.Schedule as Sched
 -- E.g. "3.5% per annum" is represented as 0.035
 newtype RatePerAnnum = RatePerAnnum { unRatePerAnnum : Decimal }
   deriving (Eq, Show, Ord)
+
+instance Display RatePerAnnum where
+  display a = show (a.unRatePerAnnum * 100.0) <> "% per annum"
 
 data LoanApplicationData = LoanApplicationData
   with
@@ -83,6 +88,17 @@ template LoanApplication
             amount = applicationData.amount
             rate
             durationYears = applicationData.durationYears
+
+instance Display LoanApplication where
+  display a = T.intercalate "\n" $
+    ("Loan Application from " <> show a.borrower <> " to " <> show a.agent) ::
+      (map ("> "<>) (T.lines $ display a.applicationData))
+
+instance Display LoanApplicationData where
+  display a = T.intercalate "\n"
+    [ "Requesting: " <> display a.amount <> " of " <> display a.instrument <> " at " <> display a.maxInterestRate
+    , "For: " <> a.prospectus
+    ]
 
 template UnderwritingRequest
   with

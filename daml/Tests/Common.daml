@@ -50,6 +50,8 @@ import qualified Daml.Finance.Interface.Settlement.Batch as Batch
 import DA.List.Total (head)
 import DA.Optional (fromSome, isSome)
 
+import Util.Display
+
 -- | Parties representing various agents in the syndicated loan workflow
 -- Each type of agent has two representatives so that we can test disclosure
 -- and divulgence.
@@ -267,7 +269,6 @@ preOrigination LedgerParties{..} = do
 
     aliceCashHoldingCid <- submit fed_ingrid do exerciseCmd aliceRequestCid CreditAccount.Accept
 
-
     -- ...for Charlie's agency
     charlieRequestCid <- submit agent_charlie do
       createCmd CreateAccount.Request with owner = agent_charlie; custodian = fed_ingrid
@@ -322,6 +323,7 @@ origination LedgerParties{..} PreOriginationStuff{..} = do
           maxInterestRate = rate
           prospectus = "To test the syndicated loans framework :)"
           durationYears = 10
+  log loanApplication
   -- Borrower submits an application for a loan
   application <- submit borrower_alice $ createCmd loanApplication
   -- Agent coordinating the lending first asks an underwriter for a report
