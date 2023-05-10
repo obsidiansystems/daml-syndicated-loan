@@ -255,6 +255,7 @@ template UnderwritingResult
           underwriter
           agent = application.agent
           uuid = application.uuid
+          reportCid = self
           report = this.report
           participant = disclose_to
 
@@ -333,15 +334,18 @@ template AcceptedMandateLetter
 -- | This template represents a signed underwriting report that is being shared with a prospective lender.
 -- The agent cannot request funding from a lender without providing this information. It is a separate template
 -- to maintain the privacy of the borrower until it is appropriate to reveal their identity to the relevant parties.
+--
+-- NOTE: The underwriter is not a signatory so as not to reveal the existence of funding requests to the underwriter
 template UnderwritingDisclosure
   with
-    underwriter : Party
     agent : Party
     uuid : Text
+    reportCid : ContractId UnderwritingResult
+    underwriter : Party
     report : UnderwritingReport
     participant : Party
   where
-    signatory underwriter, agent
+    signatory agent
     observer participant
 
     nonconsuming choice MakeFundingRequest : ContractId FundingRequest
@@ -349,19 +353,24 @@ template UnderwritingDisclosure
         requestee : Party
       controller agent
       do
+        fetchedReport <- fetch reportCid
+        assertMsg "Disclosed report does not match signed report" $ this.report == fetchedReport.report
+        assertMsg "Underwriter disclosed does not match authorizing underwriter" $ this.underwriter == fetchedReport.underwriter
         create FundingRequest with
           agent = agent
           uuid = uuid
           totalApplicationAmount = report.amount
           participant = requestee
-          underwrite = self
+          reportCid = self
+          report
 
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
 template FundingRequest
   with
     agent : Party
     uuid : Text
-    underwrite : ContractId UnderwritingDisclosure
+    reportCid : ContractId UnderwritingDisclosure
+    report : UnderwritingReport
     totalApplicationAmount : Decimal
     -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
     participant : Party
@@ -372,20 +381,27 @@ template FundingRequest
     key (agent, participant, uuid) : (Party, Party, Text)
     maintainer key._1
 
+    choice FundingRequest_Reject : ()
+      controller participant
+      do
+        pure ()
+
     choice FundingRequest_Respond : ContractId FundingInterest
       with
         amount : Decimal
         rate : RatePerAnnum
       controller participant
       do
-        disclosed <- fetch underwrite
+        disclosed <- fetch reportCid
+        assertMsg "Report does not match disclosed report" $
+          disclosed.report == this.report
         assertMsg "Must respond with an interest rate less than the maximum underwritten" $
           rate <= disclosed.report.maxInterestRate
         create FundingInterest with
           agent
           uuid
           participant
-          instrument = disclosed.report.instrument
+          instrument = report.instrument
           amount
           rate
 
