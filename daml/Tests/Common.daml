@@ -619,19 +619,12 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
   let routedSteps = map (\(icid, iv) -> (icid, iv.routedStep)) instructionViews
 
   -- initiate Map Party (Optional ContractId CashHolding, Optional ContractId BondHolding)
-  let partyCashHoldingsMap = Map.fromList
-        [ (lender_gary, Some preOriginationStuff.garyCashHoldingCid)
-        , (lender_hortense, Some preOriginationStuff.hortenseCashHoldingCid)
-        , (agent_charlie, Some preOriginationStuff.charlieCashHoldingCid)
-        , (borrower_alice, Some preOriginationStuff.aliceCashHoldingCid)
+  let partyHoldingsMap = Map.fromList
+        [ (lender_gary, Some (preOriginationStuff.garyCashHoldingCid, garyBondAccountKey))
+        , (lender_hortense, Some (preOriginationStuff.hortenseCashHoldingCid, hortenseBondAccountKey))
+        , (agent_charlie, Some (preOriginationStuff.charlieCashHoldingCid, charlieBondAccountKey))
+        , (borrower_alice, Some (preOriginationStuff.aliceCashHoldingCid, aliceBondAccountKey))
         ]
-  -- TODO: This should be used to transfer bonds
-  -- let partyBondAccountsMap = Map.fromList
-  --       [ (lender_gary, garyBondAccountKey)
-  --       , (lender_hortense, hortenseBondAccountKey)
-  --       , (agent_charlie, charlieBondAccountKey)
-  --       , (borrower_alice, aliceBondAccountKey)
-  --       ]
 
       f (accum, map') (icid, routedStep) = do
         let key' = routedStep.sender
@@ -640,10 +633,16 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         case optionalReceiverHoldingCid  of
           None -> fail $ "Could not find Holding for " <> show key'
           Some None -> fail $ "Insufficient funds for " <> show key'
-          Some (Some receiverHoldingCid) -> do
+          Some (Some (receiverCashHoldingCid, receiverBondHoldingAcc)) -> do
             SplitResult{splitCids, rest} <- submit key' do
-              exerciseCmd (coerceInterfaceContractId @Fungible receiverHoldingCid) Fungible.Split with
+              -- Check to make sure routedStep is a step dealing with USD Accounts or Bond Accounts
+              let accountInUse = if routedStep.quantity.unit == usdInstrument then receiverCashHoldingCid else receiverBondHoldingAcc
+              exerciseCmd (coerceInterfaceContractId @Fungible accountInUse) Fungible.Split with
                 amounts = [routedStep.quantity.amount]
+                -- If not, it's a bond and should be handled in the following manner when splitting:
+                -- 1. Coerce Bond into Fungible
+                -- 2. Split the fungible
+                -- 3. When it's time to distribute Fungible, coerce it back to Bond
             debug $ "splitCids: " <> show splitCids
             debug $ "rest: " <> show rest
             assertMsg "we only split a single amount" $ Prelude.length splitCids == 1
@@ -657,7 +656,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
 
             return ((routedStep.receiver, allocInstructions) :: accum, newMap)
   -- Have each party pledge where funds should be coming from
-  allocatedSettleInstructions <- fst <$> foldlA f ([], partyCashHoldingsMap) routedSteps
+  allocatedSettleInstructions <- fst <$> foldlA f ([], partyHoldingsMap) routedSteps
 
   -- initiate Map Party AccountKey
   let partyAccountMap = Map.fromList
