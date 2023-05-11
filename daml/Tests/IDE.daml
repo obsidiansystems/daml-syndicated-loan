@@ -24,5 +24,11 @@ negativeTestIDE = do
   parties <- createParties
   preorigination <- preOrigination parties
   _ <- originationTests parties preorigination
-  _ <- bobNegativeTests parties preorigination
+  pure ()
+
+rejectionTestsIDE : Script ()
+rejectionTestsIDE = do
+  parties <- createParties
+  preorigination <- preOrigination parties
+  _ <- rejectionTests parties preorigination
   pure ()

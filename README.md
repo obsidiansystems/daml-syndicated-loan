@@ -26,7 +26,7 @@ A syndicated loan is a loan that is issued by multiple parties, called participa
 A basic syndicated loan involves the following primary parties:
 
 * a single borrower who requests a loan from an agent;
-* an agent (also called an arranger) who collects the borrowers information, underwrites the loan, and then proposes it (without the borrowers personal information) to a group of participant lenders;
+* an agent (also called an arranger) who collects the borrowers information, underwrites the loan, and then proposes it (without the borrower's personal information) to a group of participant lenders;
 * participants, who review the agent's proposals and offer loans for set sums and interest rates to satisfy part of the loan request.
 
 ### Workflows

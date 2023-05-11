@@ -13,7 +13,7 @@ import Scripts.PreOrigination
 import Scripts.Settlement
 import qualified Tests.FailedUnderwriting
 
-import Tests.IDE (negativeTestIDE)
+import Tests.IDE
 import Tests.Util
 import Util.Display
 
@@ -79,5 +79,10 @@ failedUnderwriting = Tests.FailedUnderwriting.failedUnderwriting
 -- | Negative tests, including tests of privacy invariants and exercise rights
 runNegativeTests : Script ()
 runNegativeTests = negativeTestIDE
+
+-- | Rejection tests including agent rejecting
+-- loan app and lenders rejecting funding request
+runRejectionTests : Script ()
+runRejectionTests = rejectionTestsIDE
 
 -- Note: Some divulgence warnings appear at the end of this file.  These are caused by tests that check whether incorrect divulgence has occurred.
