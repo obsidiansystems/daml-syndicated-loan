@@ -254,6 +254,9 @@ instance Display LoanApplicationProcess where
     (show a.agent <> " is processing application " <> display a.applicationCid <> " from " <> show a.borrower) ::
       displayLinesWith ("> " <>) a.application.applicationData
 
+-- | This template represents a request by an agent on behalf of a borrower for an underwriting report.
+-- The borrower does not sign this request to maintain anonymity between them and the underwriter,
+-- so we keep track of the original accepted application for auditing purposes.
 template UnderwritingRequest
   with
     underwriter : Party
@@ -433,6 +436,10 @@ template AcceptedMandateLetter
           agent
           reportCid
 
+-- | When the agent wishes to use the accepted mandate letter as a proof of consent to approach lenders for
+-- funding, they provide this token instead of the mandate letter as such. This avoids disclosing the
+-- mandate letter contents to the underwriter through divulgence when the `UnderwritingResult_Disclose` choice
+-- is exercised.
 template AcceptedMandateLetterToken
   with
     borrower : Party
@@ -456,6 +463,7 @@ instance Display AcceptedMandateLetter where
 -- to maintain the privacy of the borrower until it is appropriate to reveal their identity to the relevant parties.
 --
 -- NOTE: The underwriter is not a signatory so as not to reveal the existence of funding requests to the underwriter
+-- The signed result is referenced for auditing purposes.
 template UnderwritingDisclosure
   with
     agent : Party
@@ -585,6 +593,8 @@ displayFundingInterestTerms : FundingInterest -> Text
 displayFundingInterestTerms a =
     "Terms: " <> display a.amount <> " of " <> display a.report.instrument <> " at " <> display a.rate
 
+-- | This represents the final loan offer from the agent to the borrower. At this point, the agent
+-- should be sure that they have secured enough funding for the loan.
 template SyndicatedLoanOffer
   with
     uuid : Text
@@ -633,6 +643,9 @@ instance Display LoanTerms where
     <> "\n"
     <> "Repayment schedule: " <> display a.schedule
 
+-- | This template represents an agreement between the borrower and the agent to commit to originating a loan
+-- with these exact terms. For auditing purposes, the mandate letter which is necessary for consent of the
+-- loan origination process is included.
 template AcceptedLoanOffer
   with
     uuid : Text
@@ -658,8 +671,9 @@ instance Display AcceptedLoanOffer where
     (show a.mandateLetter.borrower <> " accepted loan offer from " <> show a.mandateLetter.agent) ::
       displayIndent a.terms
 
--- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
-template LoanAgreement
+-- | The final loan agreement should include all parties. The privacy barrier is dropped in this final step.
+-- In the bookbuilding process, no identities are revealed.
+data LoanAgreement = LoanAgreement
   with
     agent : Party
     participantsWithAmounts : Map Party (Decimal)
@@ -667,10 +681,10 @@ template LoanAgreement
     uuid : Text -- Points to UnderwritingRequest.uuid
     prospectus : Text
     loanTerms : LoanTerms
-  where
-    signatory agent, borrower, Map.keys participantsWithAmounts
-    ensure sum (Map.values participantsWithAmounts) == loanTerms.amount
+  deriving (Eq, Show)
 
+-- | This represents a loan agreement that has been signed by all parties, but does not yet have all the details necessary for closing.
+-- In particular, how settlement and lifecycling of the loan instrument has not yet been determined.
 template PendingLoanAgreement
   with
     loanAgreement : LoanAgreement
@@ -735,6 +749,8 @@ data OriginatedLoanAgreement_LifecycleData = OriginatedLoanAgreement_LifecycleDa
   newBondKey : Optional InstrumentKey
   effects : [ContractId Effect]
 
+-- | This template represents the fully signed loan agreement along with the instrument definition, and the
+-- means of settlement and lifecycling for the loan.
 template OriginatedLoanAgreement
   with
     loanAgreement : LoanAgreement
