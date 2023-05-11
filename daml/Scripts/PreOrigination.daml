@@ -58,37 +58,37 @@ preOrigination parties@(LedgerParties{..}) = do
       ]
 
     log "-- Creating accounts --"
-    let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
-    let makeLoanAccount = makeAccount "Loan" accountFactoryCid holdingFactoryCid
+    let conf custodian owner = AccountConfig with ..
+        mkCashAccount = makeAndFundAccount usdInstrument . conf fed
+        makeLoanAccount = makeAccount "Loan" . conf borrower_alice
 
     -- Hortense's USD account
     (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense 100_000_000.00
     -- Hortense's loan account
-    hortenseLoanAccount <- makeLoanAccount lender_hortense borrower_alice
+    hortenseLoanAccount <- makeLoanAccount lender_hortense
 
     -- Gary's USD account
     (garyAccount, Some garyCashHoldingCid) <- mkCashAccount lender_gary 70_000_000.00
     -- Gary's loan account
-    garyLoanAccount <- makeLoanAccount lender_gary borrower_alice
+    garyLoanAccount <- makeLoanAccount lender_gary
 
     -- Rue's USD account
     (_rueAccount, Some _rueCashHoldingCid) <- mkCashAccount lender_rue 70_000_000.00
     -- Rue's loan account
-    _rueLoanAccount <- makeLoanAccount lender_rue borrower_alice
+    _rueLoanAccount <- makeLoanAccount lender_rue
 
-    -- ...for Alice's Company
     -- Bob's USD account
     (bobAccount, None) <- mkCashAccount borrower_bob 0.0
 
     -- Alice's USD account
     (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice 20_000_000.00
     -- Alices's loan account
-    aliceLoanAccount <- makeLoanAccount borrower_alice borrower_alice
+    aliceLoanAccount <- makeLoanAccount borrower_alice
 
     -- ...for Charlie's agency
     (charlieAccount, Some charlieCashHoldingCid) <- mkCashAccount agent_charlie 6_000_000_000.00
     -- Charlies's bond account (request)
-    charlieLoanAccount <- makeLoanAccount agent_charlie borrower_alice
+    charlieLoanAccount <- makeLoanAccount agent_charlie
 
     -- Debbie's USD account
     (debbieAccount, None) <- mkCashAccount agent_debbie 0.0
