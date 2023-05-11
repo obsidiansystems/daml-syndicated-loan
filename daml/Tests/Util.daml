@@ -25,29 +25,41 @@ getHoldingOfAmount
   :  AccountKey
   -> InstrumentKey
   -- ^ Target currency
-  -> Decimal
-  -- ^ Target quantity
+  -> Optional Decimal
+  -- ^ Some: return a Holding of this exact amount
+  --   None: merge all account holdings and return this Holding
   -> Script (Optional (ContractId Holding.Fungible))
   -- ^ None: insufficient funds, Some: a holding of the specified quantity
-getHoldingOfAmount k currency qty = do
-  getAccountHoldings k currency >>= letsGo
+getHoldingOfAmount k currency mQty =
+  case mQty of
+    None ->
+      getAccountHoldings k currency >>= \case
+        [] -> pure None
+        [one] -> pure $ Some (fst one)
+        first :: rest -> Some <$> merge (fst first) (fst <$> rest)
+    Some qty ->
+      getAccountHoldings k currency >>= letsGo qty
   where
-    letsGo holdings
-      | sum (map ((.amount) . snd) holdings) < qty = pure None -- Insufficient funds
-      | Some exactMatch <- getExactMatch holdings = pure $ Some (fst exactMatch) -- We have an exact match (lucky!)
+    letsGo qty holdings
+      | sum (map ((.amount) . snd) holdings) < qty =
+          pure None -- Insufficient funds
+      | Some exactMatch <- getExactMatch qty holdings =
+          pure $ Some (fst exactMatch) -- We have an exact match (lucky!)
       | otherwise = do
         case holdings of
           [] -> pure None -- already handlded by the sum check above
-          [justOne] -> Some <$> doSplit (fst justOne)
-          (holding1 :: otherHoldings) -> do
-            mergedHolding <- merge (fst holding1) (fst <$> otherHoldings)
-            Some <$> doSplit mergedHolding
+          [justOne] -> Some <$> doSplit qty (fst justOne)
+          (holding1 :: otherHoldings) -> doMerge qty holding1 otherHoldings
 
-    doSplit holdingCid = do
+    doMerge qty first rest = do
+      mergedHolding <- merge (fst first) (fst <$> rest)
+      Some <$> doSplit qty mergedHolding
+
+    doSplit qty holdingCid = do
       [res] <- split holdingCid [qty]
       pure res
 
-    getExactMatch holdings =
+    getExactMatch qty holdings =
       head $ filter ((== qty) . (.amount) . snd) holdings
 
     merge

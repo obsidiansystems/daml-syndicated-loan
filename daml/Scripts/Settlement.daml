@@ -14,7 +14,6 @@ import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction (A
 import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
 import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
 
-import Daml.Finance.Holding.Fungible (Fungible)
 import Daml.Finance.Settlement.Batch qualified as B
 
 import Scripts.Parties
@@ -89,7 +88,6 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement
     effectCid
     borrower = borrower_alice
     lender = lender_gary
-    lenderLoanHoldingCid = lenderGaryBondHolding
     lenderLoanAccount = ledgerAccounts.garyLoanAccount
     lenderCashAccount = ledgerAccounts.garyAccount
     borrowerCashAccount = ledgerAccounts.aliceAccount
@@ -100,7 +98,6 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement
     effectCid
     borrower = borrower_alice
     lender = lender_hortense
-    lenderLoanHoldingCid = lenderHortenseBondHolding
     lenderLoanAccount = ledgerAccounts.hortenseLoanAccount
     lenderCashAccount = ledgerAccounts.hortenseAccount
     borrowerCashAccount = ledgerAccounts.aliceAccount
@@ -111,7 +108,6 @@ data LenderClaimConfig = LenderClaimConfig with
   orig : Origination
   effectCid : ContractId Effect
   lender : Party
-  lenderLoanHoldingCid : ContractId Fungible
   lenderLoanAccount : AccountKey
   lenderCashAccount : AccountKey
   borrower : Party
@@ -120,6 +116,10 @@ data LenderClaimConfig = LenderClaimConfig with
 
 processLenderClaim : LenderClaimConfig -> Script ()
 processLenderClaim LenderClaimConfig{..} = do
+  Some lenderLoanHoldingCid <- Util.getHoldingOfAmount
+    lenderLoanAccount
+    orig.origLoanAgreement.bondKey
+    None
   let lenderLoanHoldingBase = toInterfaceContractId @Holding.Base lenderLoanHoldingCid
 
   claimResult <- submit lender $
@@ -147,7 +147,10 @@ processLenderClaim LenderClaimConfig{..} = do
     approval = TakeDelivery lenderLoanAccount
 
   Some couponProducedInstr <- queryContractId borrower (fromInterfaceContractId @Settlement.Instruction couponProduced)
-  Some borrowerCashUsed <- Util.getHoldingOfAmount borrowerCashAccount couponProducedInstr.routedStep.quantity.unit couponProducedInstr.routedStep.quantity.amount
+  Some borrowerCashUsed <- Util.getHoldingOfAmount
+    borrowerCashAccount
+    couponProducedInstr.routedStep.quantity.unit
+    (Some couponProducedInstr.routedStep.quantity.amount)
 
   (couponProduced2, _) <- submit borrower $ exerciseCmd couponProduced Instruction.Allocate with
     actors = Set.fromList [borrower]
