@@ -204,6 +204,7 @@ template LoanApplicationProcess
         report <- fetch reportCid
         assertMsg "Report application does not match accepted application" $ report.application == this.application
         assertMsg "Report application cid does not match accepted application cid" $ report.applicationCid == this.applicationCid
+        assertMsg "Underwriting failed" report.result
         create MandateLetterOffer with
           agent = application.agent
           borrower = application.borrower
