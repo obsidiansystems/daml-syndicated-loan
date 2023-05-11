@@ -10,6 +10,7 @@ module Workflow.Origination
   , AcceptedMandateLetterToken_Burn(..)
   , CreateUnderwritingResult(..)
   , FundingInterest(..)
+  , displayFundingInterest
   , displayFundingInterestTerms
   , FundingInterest_Decline(..)
   , FundingInterest_SignAgreement(..)
@@ -94,8 +95,6 @@ data LoanApplicationData = LoanApplicationData
     -- ^ The instrument in which the loan is denominated
     amount : Decimal
     -- ^ The amount requested
-    durationYears : Int
-    -- ^ The loan term requested
     maxInterestRate : RatePerAnnum
     -- ^ The maximum interest rate desired
     schedule : PeriodicSchedule
@@ -115,6 +114,8 @@ template LoanApplicationSubmission
   where
     signatory borrower
     observer agent
+    ensure applicationData.schedule.terminationDate > applicationData.schedule.effectiveDate
+           && applicationData.amount > 0.0
 
     choice LoanApplicationSubmission_Reject : ()
       controller agent
@@ -158,7 +159,6 @@ template AcceptedLoanApplication
       controller agent
       do
         create LoanApplicationProcess with
-          agent
           borrower
           application = this
           applicationCid = self
@@ -178,16 +178,15 @@ instance Display AcceptedLoanApplication where
 -- constructed, will the validity of the loan application be established.
 template LoanApplicationProcess
   with
-    agent : Party
     borrower : Party
     application : AcceptedLoanApplication
     applicationCid : ContractId AcceptedLoanApplication
   where
-    signatory agent
+    signatory application.agent
     nonconsuming choice LoanApplicationProcess_CreateUnderwritingRequest : ContractId UnderwritingRequest
       with
         underwriter : Party
-      controller agent
+      controller application.agent
 
       do
         fetchedApplication <- fetch applicationCid
@@ -213,14 +212,14 @@ template LoanApplicationProcess
           mandateLetter = MandateLetter with
             instrument = report.report.instrument
             amount = report.report.amount
-            durationYears = report.report.durationYears
+            schedule = report.report.schedule
             prospectus = report.report.prospectus
     -- NOTE: Consuming— we assume that at this point the state of the application is "take it or leave it"
     choice LoanApplicationProcess_CreatePendingLoanAgreement : ContractId PendingLoanAgreement
       with
         borrower_commitment : ContractId AcceptedLoanOffer
         lender_commitments : Map (ContractId FundingInterest) Decimal
-      controller agent
+      controller application.agent
       do
         acceptedLoanOffer <- fetch borrower_commitment
         let acceptedTerms = acceptedLoanOffer.terms
@@ -230,7 +229,7 @@ template LoanApplicationProcess
           pure (commitment.participant, amount)
         pendingAgreementCid <- create PendingLoanAgreement with
           loanAgreement = LoanAgreement with
-            agent
+            agent = application.agent
             borrower
             loanTerms = acceptedTerms
             participantsWithAmounts = Map.fromList lenderCommitments
@@ -251,7 +250,7 @@ template LoanApplicationProcess
 
 instance Display LoanApplicationProcess where
   display a = T.intercalate "\n" $
-    (show a.agent <> " is processing application " <> display a.applicationCid <> " from " <> show a.borrower) ::
+    (show a.application.agent <> " is processing application " <> display a.applicationCid <> " from " <> show a.borrower) ::
       displayLinesWith ("> " <>) a.application.applicationData
 
 -- | This template represents a request by an agent on behalf of a borrower for an underwriting report.
@@ -287,7 +286,7 @@ template UnderwritingRequest
           report = UnderwritingReport with
             instrument = this.application.applicationData.instrument
             amount = this.application.applicationData.amount
-            durationYears = this.application.applicationData.durationYears
+            schedule = this.application.applicationData.schedule
             maxInterestRate = this.application.applicationData.maxInterestRate
             prospectus = this.application.applicationData.prospectus
           result
@@ -337,10 +336,9 @@ data UnderwritingReport = UnderwritingReport with
     instrument : InstrumentKey
     amount : Decimal -- Principal
     maxInterestRate : RatePerAnnum -- the maximum interest rate that the applicant is underwritten for
-    durationYears : Int
-    -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
+    schedule : PeriodicSchedule
     prospectus : Text
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Show)
 
 instance Display UnderwritingReport where
   display a = "Request: "
@@ -349,22 +347,21 @@ instance Display UnderwritingReport where
     <> display a.instrument
     <> " at "
     <> display a.maxInterestRate
-    <> " for "
-    <> show a.durationYears <> " years"
+    <> "\n"
+    <> "Repayment schedule: " <> display a.schedule
 
 -- | The information from the Underwriter's report on the application that will be shared with the applicant.
 data MandateLetter = MandateLetter
   with
     instrument : InstrumentKey
     amount : Decimal -- Principal. TODO: for now always equal to LoanApplication.amount
-    durationYears : Int
-    -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
+    schedule : PeriodicSchedule
     prospectus : Text
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Show)
 
 instance Display MandateLetter where
   display a = T.intercalate "\n"
-    [ "Terms: " <> display a.amount <> " of " <> display a.instrument <> " for " <> show a.durationYears <> "y"
+    [ "Terms: " <> display a.amount <> " of " <> display a.instrument <> "\n" <> "Repayment schedule: " <> display a.schedule
     , "Prospectus: " <> a.prospectus
     ]
 
@@ -426,8 +423,7 @@ template AcceptedMandateLetter
             instrument = mandateLetter.instrument
             amount = mandateLetter.amount
             rate
-            durationYears = mandateLetter.durationYears
-            schedule = application.applicationData.schedule
+            schedule = mandateLetter.schedule
     nonconsuming choice AcceptedMandateLetter_CreateToken : ContractId AcceptedMandateLetterToken
       controller agent
       do
@@ -490,7 +486,6 @@ template UnderwritingDisclosure
           totalApplicationAmount = report.amount
           participant = requestee
           reportCid = self
-          report
 
 instance Display UnderwritingDisclosure where
   display a = "Underwriting report disclosed by " <> show a.agent <> " to " <> show a.participant
@@ -501,7 +496,6 @@ template FundingRequest
     agent : Party
     uuid : Text
     reportCid : ContractId UnderwritingDisclosure
-    report : UnderwritingReport
     totalApplicationAmount : Decimal
     -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
     participant : Party
@@ -524,8 +518,6 @@ template FundingRequest
       controller participant
       do
         disclosed <- fetch reportCid
-        assertMsg "Report does not match disclosed report" $
-          disclosed.report == this.report
         assertMsg "Must respond with an interest rate less than the maximum underwritten" $
           rate <= disclosed.report.maxInterestRate
         create FundingInterest with
@@ -533,7 +525,6 @@ template FundingRequest
           uuid
           participant
           reportCid
-          report
           amount
           rate
 
@@ -547,7 +538,6 @@ template FundingInterest
     uuid : Text
     participant : Party
     reportCid : ContractId UnderwritingDisclosure
-    report : UnderwritingReport
     amount : Decimal
     rate : RatePerAnnum
     -- TODO: for now we just reject offers that are greater than LoanApplication.maxInterestRate, but eventually we'd like to accept all offers that makes it possible for the agent to offer a final loan of less than or equal to LoanApplication.maxInterestRate.
@@ -568,7 +558,6 @@ template FundingInterest
         pendingAgreement <- fetch agreementCid
         let loanAgreement = pendingAgreement.loanAgreement
         fetchedDisclosure <- fetch reportCid
-        assertMsg "Report does not match referenced report" $ fetchedDisclosure.report == this.report
         fetchedReport <- fetch fetchedDisclosure.reportCid
         assertMsg "Disclosed report does not match original report" $ fetchedReport.report == fetchedDisclosure.report
         fetchedApplication <- fetch pendingAgreement.applicationCid
@@ -583,15 +572,16 @@ template FundingInterest
             exercise agreementCid PendingLoanAgreement_Sign with
               signer = this.participant
 
-instance Display FundingInterest where
-  display a = T.intercalate "\n"
+
+displayFundingInterest : FundingInterest -> UnderwritingDisclosure -> Text
+displayFundingInterest a b = T.intercalate "\n"
     [ show a.participant <> " sends offer to " <> show a.agent
-    , displayFundingInterestTerms a
+    , displayFundingInterestTerms a b
     ]
 
-displayFundingInterestTerms : FundingInterest -> Text
-displayFundingInterestTerms a =
-    "Terms: " <> display a.amount <> " of " <> display a.report.instrument <> " at " <> display a.rate
+displayFundingInterestTerms : FundingInterest -> UnderwritingDisclosure -> Text
+displayFundingInterestTerms a b = do
+    "Terms: " <> display a.amount <> " of " <> display b.report.instrument <> " at " <> display a.rate
 
 -- | This represents the final loan offer from the agent to the borrower. At this point, the agent
 -- should be sure that they have secured enough funding for the loan.
@@ -628,8 +618,6 @@ data LoanTerms = LoanTerms with
     amount : Decimal -- Principal. TODO: for now always equal to LoanApplication.amount
     rate : RatePerAnnum
     -- ^ The interest amount paid by the borrower yearly is (amount * rate).
-    durationYears : Int
-    -- ^ The number of years after which the principal amount must be returned to the lenders.
     schedule : PeriodicSchedule
     -- ^ Repayment coupon schedule
       deriving (Eq, Show)
@@ -639,7 +627,6 @@ instance Display LoanTerms where
     "Terms: " <> display a.amount
     <> " of " <> display a.instrument
     <> " at " <> display a.rate
-    <> " for " <> show a.durationYears <> "y"
     <> "\n"
     <> "Repayment schedule: " <> display a.schedule
 

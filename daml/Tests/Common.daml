@@ -1,6 +1,5 @@
 module Tests.Common where
 
-import DA.Action
 import Daml.Script
 
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)

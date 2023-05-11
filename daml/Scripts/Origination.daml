@@ -54,7 +54,6 @@ originate LedgerParties{..} PreOrigination{..} = do
           amount
           maxInterestRate = rate
           prospectus = "Loan for acquisition of competitor"
-          durationYears = 10
           schedule
 
   -- Loan application proposal and acceptance

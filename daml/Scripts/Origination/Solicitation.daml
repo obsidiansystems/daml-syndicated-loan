@@ -35,7 +35,14 @@ solicitBids SolicitBids{..} = do
   fundingInterestCids <- forA possibleLenders $ \lender -> do
     [(fundingRequestCid, _fundingRequest)] <- getFundingRequestsFor lender
     cid <- submit lender $ makeFundingInterest fundingRequestCid (amount / 2.0 + 1.0, rate)
-    logLedger lender cid
+    -- To display all of the information we would like, we need to fetch a contract contained
+    -- within the funding interest, unfortunately barring us from using the normal logging
+    -- fixtures we've created.
+    Some c <- queryContractId lender cid
+    md <- queryContractId lender c.reportCid
+    case md of
+      None -> fail $ "Could not find contract id " <> show c.reportCid <> " with party " <> show lender
+      Some d -> log $ displayFundingInterest c d
     pure cid
   fundingInterests <- forA fundingInterestCids $ \cid -> do
     Some fundingInterest <- queryContractId agent cid
