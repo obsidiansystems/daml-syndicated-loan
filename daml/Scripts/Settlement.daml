@@ -39,15 +39,18 @@ data SettlementState = SettlementState
     bondInstrument : InstrumentKey
   deriving (Eq, Show)
 
-runBondSteps : LedgerParties -> PreOrigination -> Party -> Time -> ContractId OriginatedLoanAgreement -> Int -> Int -> Script ()
-runBondSteps p po agent startTime currentOriginatedLoanAgreement yearNum maxYearNum = if yearNum > maxYearNum then pure () else do
+runBondSteps : LedgerParties -> PreOrigination -> Party -> Time -> ContractId OriginatedLoanAgreement -> Int -> Int -> Script (Optional (ContractId OriginatedLoanAgreement))
+runBondSteps p po agent startTime currentOriginatedLoanAgreement yearNum maxYearNum = do
   let (y',m',d') = toGregorian (toDateUTC startTime)
       newDate = date (y'+yearNum) m' d'
   setTime (time newDate 4 4 4)
   result <- runBondStep p po agent currentOriginatedLoanAgreement newDate
   case result of
-    Some newOriginatedLoanAgreement -> runBondSteps p po agent startTime newOriginatedLoanAgreement (yearNum + 1) maxYearNum
-    None -> pure ()
+    Some newOriginatedLoanAgreement ->
+      if yearNum < maxYearNum
+      then runBondSteps p po agent startTime newOriginatedLoanAgreement (yearNum + 1) maxYearNum
+      else pure result
+    None -> pure None
 
 -- | Test script that
 -- 1. executes the `runTransfer` script
