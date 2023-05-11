@@ -1,3 +1,4 @@
+-- | Loan offer from agent to borrower, based on commitments from lenders
 module Scripts.Origination.Offer where
 
 import DA.List qualified as L
@@ -8,6 +9,8 @@ import Daml.Script
 import Util.Display
 import Workflow.Origination
 
+-- | Given a loan application, a mandate letter, and collected funding interests
+-- from lenders, perform offer and acceptance of a loan agreement.
 makeOffer
   : LoanApplicationSubmission
   -> ContractId AcceptedMandateLetter
@@ -41,11 +44,20 @@ selectFundingInterests application interests =
         fundingSelection_selected = book
         fundingSelection_declined = leftover
 
-createLoanProposal : ContractId AcceptedMandateLetter -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
-createLoanProposal applicationCid rate = exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
-  rate
+-- | Propose syndicated loan to borrower
+createLoanProposal
+  : ContractId AcceptedMandateLetter
+  -> RatePerAnnum
+  -> Commands (ContractId SyndicatedLoanOffer)
+createLoanProposal applicationCid rate =
+  exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
+    rate
 
-acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoanOffer)
+-- | Borrower accepts loan proposal, creating binding loan agreement
+acceptLoanProposal
+  : Party
+  -> ContractId SyndicatedLoanOffer
+  -> Script (ContractId AcceptedLoanOffer)
 acceptLoanProposal borrower offerCid = do
   submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
@@ -58,13 +70,24 @@ buildBook
   -> Decimal
   -> Map (ContractId FundingInterest) Decimal
   -> [(ContractId FundingInterest, FundingInterest)]
-  -> (RatePerAnnum, Map (ContractId FundingInterest) Decimal, [ContractId FundingInterest])
+  -> ( RatePerAnnum
+     , Map (ContractId FundingInterest) Decimal
+     , [ContractId FundingInterest]
+     )
 buildBook _ _ _ [] = error "Not enough funding interest to construct loan"
 buildBook application accumulatedAmount accumulatedBook ((fundingCid, funding)::fundings) =
   if funding.rate > application.applicationData.maxInterestRate
-    then error "Not enough funding interest below the maximum interest rate to construct loan"
+    then
+      error "Not enough funding interest below the maximum interest rate to construct loan"
     else
       let remainingRequiredFunding = application.applicationData.amount - accumulatedAmount
        in if remainingRequiredFunding <= funding.amount
-            then (funding.rate, Map.insertWith (+) fundingCid remainingRequiredFunding accumulatedBook, map fst fundings)
-            else buildBook application (accumulatedAmount + funding.amount) (Map.insertWith (+) fundingCid funding.amount accumulatedBook) fundings
+            then ( funding.rate
+                 , Map.insertWith (+) fundingCid remainingRequiredFunding accumulatedBook
+                 , map fst fundings
+                 )
+            else buildBook
+                  application
+                  (accumulatedAmount + funding.amount)
+                  (Map.insertWith (+) fundingCid funding.amount accumulatedBook)
+                  fundings

@@ -29,17 +29,21 @@ data LedgerAccounts = LedgerAccounts with
     hortenseLoanAccount : AccountKey
   deriving (Show, Eq, Ord)
 
+-- | Holding account dependencies
+data AccountConfig = AccountConfig with
+  accountFactoryCid : ContractId Account.F
+  holdingFactoryCid : ContractId Holding.F
+  owner : Party
+  custodian : Party
+
 -- | Make and optionally fund an account
 makeAndFundAccount
-  : Party
-  -> InstrumentKey
-  -> ContractId Account.F
-  -> ContractId Holding.F
-  -> Party
+  : InstrumentKey
+  -> AccountConfig
   -> Numeric 10
   -> Script (AccountKey, Optional (ContractId Holding.I))
-makeAndFundAccount custodian instrument accountFactoryCid holdingFactoryCid owner amount = do
-  account <- makeAccount (display instrument) accountFactoryCid holdingFactoryCid owner custodian
+makeAndFundAccount instrument a@AccountConfig{..} amount = do
+  account <- makeAccount (display instrument) a
   holdingCid <- if (amount > 0.0)
       then do
         allocationRequestCid <- submit owner do
@@ -47,14 +51,17 @@ makeAndFundAccount custodian instrument accountFactoryCid holdingFactoryCid owne
             account
             instrument
             amount
-
         holdingCid <- submit custodian do exerciseCmd allocationRequestCid CreditAccount.Accept
         pure $ Some holdingCid
       else pure None
   return (account, holdingCid)
 
-makeAccount : Text -> ContractId Account.F -> ContractId Holding.F -> Party -> Party -> Script AccountKey
-makeAccount label accountFactoryCid holdingFactoryCid owner custodian = do
+-- | Create an account using the provided factories. The account is not funded.
+makeAccount
+  : Text
+  -> AccountConfig
+  -> Script AccountKey
+makeAccount label AccountConfig{..} = do
   accountRequestCid <- submit owner do
     createCmd CreateAccount.Request with
       custodian

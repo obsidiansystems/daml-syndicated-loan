@@ -1,3 +1,5 @@
+-- | Originates a loan. At the end of this process, we have a signed loan
+-- agreement between all the parties
 module Scripts.Origination where
 
 import DA.Date (date, toGregorian, toDateUTC)
@@ -64,15 +66,11 @@ originate LedgerParties{..} PreOrigination{..} = do
   acceptedMandateLetter <- mandatePhase agent_charlie borrower_alice applicationProcess underwritingResult
 
   -- Bid solicitation
-  let possibleLenders = [lender_gary, lender_hortense]
-  fundingInterests <- solicitBids
-    agent_charlie
-    possibleLenders
-    [lender_rue] -- Lenders who decline to participate
-    underwritingResult
-    acceptedMandateLetter
-    amount
-    rate
+  fundingInterests <- solicitBids $ SolicitBids with
+    agent = agent_charlie
+    decliningLenders = [lender_rue]
+    possibleLenders = [lender_gary, lender_hortense]
+    ..
 
   -- Book building and offer of syndicated loan to borrower
   (fundingSelection, acceptedLoan) <- makeOffer loanApplicationSubmission acceptedMandateLetter fundingInterests

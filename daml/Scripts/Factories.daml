@@ -46,5 +46,3 @@ settlementFactory provider observers = do
     createCmd Settlement.Factory with
       provider
       observers
--- 
--- 
