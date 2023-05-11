@@ -265,13 +265,24 @@ originationStep LedgerParties{..} PreOrigination{..} = do
   logLedger agent_charlie loanProposal
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   logLedger borrower_alice acceptedLoan
+
+  log "-- Pending Loan Agreement --"
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
-  signedPendingLoanAgreement <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_CreatePendingLoanAgreement with
-    borrower_commitment = acceptedLoan
-    lender_commitments = fundingSelection_selected
+  signedPendingLoanAgreement <- submit agent_charlie $
+    exerciseCmd applicationProcess LoanApplicationProcess_CreatePendingLoanAgreement with
+      borrower_commitment = acceptedLoan
+      lender_commitments = fundingSelection_selected
+  logLedger agent_charlie signedPendingLoanAgreement
+
   -- Agent declines leftover funding interests
-  forA_ fundingSelection_declined $ \declinedCid -> submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
+  forA_ fundingSelection_declined $ \declinedCid -> do
+    declined <- queryContractId agent_charlie declinedCid
+    case declined of
+      None -> pure ()
+      Some dec -> log $ show dec.agent <> " declines offer from " <> show dec.participant
+        <> "\n" <> displayFundingInterestTerms dec
+    submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
 
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   origLoanAgreementCid <- submit agent_charlie $ exerciseCmd signedPendingLoanAgreement PendingLoanAgreement_Finalize
@@ -282,7 +293,9 @@ originationStep LedgerParties{..} PreOrigination{..} = do
       fixedRateBondFactoryCid
 
   Some origLoanAgreement <- queryContractId agent_charlie origLoanAgreementCid
+  log origLoanAgreement
 
+  log $ "Loan originated at " <> show now
   pure Origination with
     origLoanAgreement
     origLoanAgreementCid
