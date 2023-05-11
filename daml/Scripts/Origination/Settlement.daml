@@ -4,11 +4,9 @@ import DA.Action
 import DA.List.Total qualified
 import DA.Map (Map)
 import DA.Map qualified as Map
-import DA.NonEmpty (NonEmpty)
 import DA.Set qualified as Set
 import Daml.Script
 
-import Daml.Finance.Holding.Fungible qualified as Fungible
 import Daml.Finance.Interface.Holding.Base qualified as HoldingBase
 import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(..))
 import Daml.Finance.Interface.Holding.Fungible qualified as Fungible (Split(..))
@@ -25,11 +23,6 @@ import Scripts.PreOrigination
 import Scripts.Origination
 import qualified Daml.Finance.Settlement.Batch as B
 import Util.Display
-
-data OriginationSettlement = OriginationSettlement with
-  borrowerAliceUsdHolding : NonEmpty (ContractId Fungible.Fungible)
-  lenderGaryBondHolding : ContractId Fungible.Fungible
-  lenderHortenseBondHolding : ContractId Fungible.Fungible
 
 settleLoan : LedgerParties -> PreOrigination -> Origination -> Script ()
 settleLoan LedgerParties {..} PreOrigination{..} origination = do
