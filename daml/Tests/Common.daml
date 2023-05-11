@@ -271,6 +271,10 @@ originationStep LedgerParties{..} PreOrigination{..} = do
   -- Agent declines leftover funding interests
   forA_ fundingSelection_declined $ \declinedCid -> do
     declined <- queryContractId agent_charlie declinedCid
+    case declined of
+      None -> pure ()
+      Some dec -> log $ show dec.agent <> " declines offer from " <> show dec.participant
+        <> "\n" <> displayFundingInterestTerms dec
     submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
 
   -- Agent constructs the final, fully signed loan agreement— ready for settlement

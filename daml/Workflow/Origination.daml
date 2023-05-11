@@ -8,6 +8,7 @@ module Workflow.Origination
   , AcceptedMandateLetter_CreateToken(..)
   , CreateUnderwritingResult(..)
   , FundingInterest(..)
+  , displayFundingInterestTerms
   , FundingInterest_Decline(..)
   , FundingInterest_SignAgreement(..)
   , FundingRequest(..)
@@ -555,8 +556,12 @@ template FundingInterest
 instance Display FundingInterest where
   display a = T.intercalate "\n"
     [ show a.participant <> " sends offer to " <> show a.agent
-    , "Terms: " <> display a.amount <> " of " <> display a.instrument <> " at " <> display a.rate
+    , displayFundingInterestTerms a
     ]
+
+displayFundingInterestTerms : FundingInterest -> Text
+displayFundingInterestTerms a =
+    "Terms: " <> display a.amount <> " of " <> display a.instrument <> " at " <> display a.rate
 
 template SyndicatedLoanOffer
   with
