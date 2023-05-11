@@ -76,15 +76,9 @@ originate LedgerParties{..} PreOrigination{..} = do
   (fundingSelection, acceptedLoan) <- makeOffer loanApplicationSubmission acceptedMandateLetter fundingInterests
 
   -- Origination signing ceremony
-  (origLoanAgreementCid, origLoanAgreement) <- multipartyAcceptance
-    agent_charlie
-    applicationProcess
-    acceptedLoan
-    fundingSelection
-    routeProviderCid
-    settlementFactoryCid
-    fixedRateBondFactoryCid
-    now
+  (origLoanAgreementCid, origLoanAgreement) <- multipartyAcceptance $ MultipartyAcceptance with
+      agent = agent_charlie
+      ..
 
   log $ "Loan originated at " <> show now
 
