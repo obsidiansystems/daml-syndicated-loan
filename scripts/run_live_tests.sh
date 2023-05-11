@@ -2,7 +2,7 @@
 runDamlScript () {
   echo "DAR: $1"
   echo "Script: $2"
-  daml script --json-api --dar $1 --script-name $2 --participant-config ./participants.json --input-file ./ledger-parties.json
+  daml script --dar $1 --script-name $2 --input-file ./ledger-parties.json --participant-config ./participants.json --max-inbound-message-size 100000000 --tls
   if [ $? -eq 1 ]; then
     echo -e "\e[31mERROR:\e[0m New DAR hasn't been pushed or Script $2 is failing on the live-ledger"
   else

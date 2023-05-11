@@ -1,45 +1,41 @@
 module Tests.Negative where
 
-import Daml.Script
-
+import DA.Date
 import DA.Foldable
 import DA.Set qualified as Set
-import Workflow.Origination
 
-import Tests.Common(LedgerParties(..), PreOriginationStuff(..))
+import Daml.Script
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
+import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
+
+import Scripts.Parties
+import Tests.Common(PreOriginationStuff(..), FundingSelection(..), selectFundingInterests)
+import Workflow.Origination
 
 originationTests : LedgerParties -> PreOriginationStuff -> Script ()
 originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
-    let aliceApplicationData = LoanApplicationData with
-          instrument = usdInstrument
-          amount = 12_345_678.00
-          maxInterestRate = RatePerAnnum 0.05 -- 5% per annum
-          prospectus = "To validate the syndicated loans framework :)"
-          durationYears = 10
+    now <- getTime
+    let startDate = toDateUTC now
+        (y,m,d) = toGregorian startDate
+        schedule = createPaymentPeriodicSchedule
+            (date (y+1) m d)
+            []
+            Following
+            Y 1
+            startDate
+            (date (y+10) m d)
+        aliceApplicationData = LoanApplicationData with
+            instrument = usdInstrument
+            amount = 12_345_678.00
+            maxInterestRate = RatePerAnnum 0.05 -- 5% per annum
+            prospectus = "To validate the syndicated loans framework :)"
+            durationYears = 10
+            schedule
 
         aliceLoanApplication = LoanApplicationSubmission with
             borrower = borrower_alice
             agent = agent_charlie
             applicationData = aliceApplicationData
-
-{-
-        bobApplicationData = LoanApplicationData with
-          instrument = usdInstrument
-          amount = 98_765_432.00
-          maxInterestRate = RatePerAnnum 0.07 -- 7% per annum
-          prospectus = "To break the syndicated loans framework >:)"
-          durationYears = 7
-
-        bobLoanApplication1 = LoanApplicationSubmission with
-            borrower = borrower_bob
-            agent = agent_debbie
-            applicationData = bobApplicationData
-
-        bobLoanApplication2 = LoanApplicationSubmission with
-            borrower = borrower_bob
-            agent = agent_debbie
-            applicationData = bobApplicationData
--}
 
     -- Workflow for Alice to submit a loan
     -- Bob cannot submit an application for Alice
@@ -99,10 +95,12 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- With the consent of the borrower in hand, Charlie can disclose the underwriting report to the lenders,
     -- and request funding based on the report.
     let prospectiveLenders = [ lender_gary, lender_hortense ]
+    
+    mandateLetterTokenCid <- testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_CreateToken
     fundingRequests <- forA prospectiveLenders $ \lender -> do
         disclosedUnderwritingReportCid <- testExercise ps agent_charlie aliceUnderwritingCid UnderwritingResult_Disclose with
             disclose_to = lender
-            mandateLetterCid = aliceMandateLetterCid
+            mandateLetterTokenCid = mandateLetterTokenCid
         -- only charlie and this specific lender can see this disclosure
         testVisibility ps [lender, agent_charlie] disclosedUnderwritingReportCid
 
@@ -119,16 +117,32 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
 
     -- The lenders now consider their respective requests, and make commitments about how much they are willing to lend
     -- Here we will contrive some differing offers.
-    forA_ fundingRequests $ \(lender, requestCid) -> do
+    fundingInterests <- forA fundingRequests $ \(lender, requestCid) -> do
         Some request <- queryContractId lender requestCid
         let RatePerAnnum maxRate = request.report.maxInterestRate
             (amount, rate)
                 | lender == lender_gary = (request.totalApplicationAmount / 3.0 + 1.0, RatePerAnnum (maxRate - 0.005))
                 | lender == lender_hortense = (request.totalApplicationAmount / 1.5 + 1.0, RatePerAnnum maxRate)
                 | otherwise = (request.totalApplicationAmount, RatePerAnnum maxRate)
-        testExercise ps lender requestCid FundingRequest_Respond with
+        cid <- testExercise ps lender requestCid FundingRequest_Respond with
             amount
             rate
+        -- for convenience we will also pull the contents of the funding interest here
+        Some c <- queryContractId agent_charlie cid
+        pure (cid, c)
+
+    -- Now that Charlie has some funding interest, they can construct a book and propose a loan to alice
+    -- Note that this will likely be done OFF ledger.
+    let FundingSelection{..} = selectFundingInterests aliceLoanApplication fundingInterests
+
+    -- Charlie makes an offer to Alice that meets both Alice's requirements, and those of the lenders
+    aliceLoanOfferCid <- testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_CreateOffer with
+        rate = fundingSelection_ratePerAnnum
+    -- At this point, only the agent and the borrower are aware of the loan offer
+    testVisibility ps [borrower_alice, agent_charlie] aliceLoanOfferCid
+    -- Even when Alice accepts the loan offer, it is not yet visible to other parties.
+    aliceAcceptedLoanOfferCid <- testExercise ps borrower_alice aliceLoanOfferCid SyndicatedLoanOffer_Accept
+    testVisibility ps [borrower_alice, agent_charlie] aliceAcceptedLoanOfferCid
     pure ()
 
 

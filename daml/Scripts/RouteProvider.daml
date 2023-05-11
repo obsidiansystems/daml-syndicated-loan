@@ -1,0 +1,28 @@
+module Scripts.RouteProvider where
+
+import DA.Map qualified as Map
+import DA.Set (Set)
+import DA.Set qualified as Set
+import Daml.Script
+
+import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
+import Daml.Finance.Settlement.RouteProvider.IntermediatedStatic (IntermediatedStatic(..))
+import Daml.Finance.Settlement.Hierarchy (Hierarchy(..))
+
+-- | Create a route provider using the authority of the provider, creating paths from
+-- each observer to each listed root custodian for each listed instrument
+createRouteProvider : Party -> Set Party -> [(Text, Party)] -> Script (ContractId RouteProvider.I)
+createRouteProvider provider observers instrumentCustodians = do
+  toInterfaceContractId @RouteProvider.I <$> submit provider do
+    createCmd IntermediatedStatic with
+      provider
+      observers
+      paths = Map.fromList $ map (\(instId, cust) -> buildPath instId cust observers) instrumentCustodians
+
+-- | Build paths from a root custodian to all of the listed parties
+buildPath : Text -> Party -> Set Party -> (Text, Hierarchy)
+buildPath id rootCustodian parties = 
+  (id, Hierarchy with
+    rootCustodian
+    pathsToRootCustodian = (::[]) <$> Set.toList parties
+  )

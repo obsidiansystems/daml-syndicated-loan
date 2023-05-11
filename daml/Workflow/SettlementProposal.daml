@@ -30,19 +30,19 @@ template SettlementProposal
     bond : InstrumentKey
     settled : Bool -- Has the 'Settle' been exercised already?
   where
-    signatory loan.agreement.borrower :: sigAccumulator
-    observer loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+    signatory loan.loanAgreement.agent::sigAccumulator
+    observer loan.loanAgreement.borrower::(map fst $ Map.toList loan.loanAgreement.participantsWithAmounts)
 
     choice Settle : (ContractId SettlementProposal, (ContractId Batch.I, [ContractId Instruction.I]))
-      controller loan.agreement.borrower
+      controller loan.loanAgreement.borrower
       do
-        let allParties = loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+        let allParties = loan.loanAgreement.borrower :: Map.keys loan.loanAgreement.participantsWithAmounts
         assertMsg "Already settled" $ not settled
         assertMsg ("Missing signatures. Expected: " <> show allParties <> ", found: " <> show sigAccumulator) $
           sort sigAccumulator == sort allParties
         let id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
         newCid <- create this with settled = True
-        res <- settleTransactions loan.agreement allParties id routeProviderCid settlementFactoryCid bond
+        res <- settleTransactions loan.loanAgreement allParties id routeProviderCid settlementFactoryCid bond
         pure (newCid, res)
 
     choice Add_Signature : ContractId SettlementProposal
@@ -50,26 +50,28 @@ template SettlementProposal
         party : Party
       controller party
       do
-        let allParties = loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+        let allParties = loan.loanAgreement.borrower :: Map.keys loan.loanAgreement.participantsWithAmounts
         assertMsg ("Not an authorized party: " <> show party) $ elem party allParties
         create this with sigAccumulator = party :: sigAccumulator
 
     choice Decline : ()
       -- ^ Decline the request.
-      controller loan.agreement.borrower :: Map.keys loan.agreement.participantsWithAmounts
+      controller loan.loanAgreement.borrower :: Map.keys loan.loanAgreement.participantsWithAmounts
       do pure ()
 
     choice Withdraw : ()
       -- ^ Withdraw the request.
-      controller loan.agreement.borrower
+      controller loan.loanAgreement.agent
       do pure ()
     choice ExecuteSettlement : [ContractId Base.Base]
       with
         batchCid : ContractId Batch.I
-      controller loan.agreement.borrower
+      controller loan.loanAgreement.agent
       do
+        let allParties = loan.loanAgreement.borrower :: Map.keys loan.loanAgreement.participantsWithAmounts
+        assertMsg "All signatures must be received before executing settlement." $ sort sigAccumulator ==  (sort allParties)
         exercise batchCid Batch.Settle with
-          actors = Set.singleton loan.agreement.borrower
+          actors = Set.singleton loan.loanAgreement.agent
 
 settleTransactions :
   (HasField "agent" r1 Party
@@ -90,12 +92,21 @@ settleTransactions :
   -> Update (a , [c])
 settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bondInstrumentKey = do
   -- Settlement of lenders (USD)
-  let stepsUsd = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
+      -- Lenders scheduled sending of funds to Agent.
+  let stepsFromLenderUsd = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
         Step with
           sender = lender
-          receiver = loan.borrower
+          receiver = loan.agent
           quantity = Quantity loan.loanTerms.instrument investAmount
+      -- Agent schedules sending of funds to Borrower.
+      stepsToBorrowerUsd =
+        Step with
+          sender = loan.agent
+          receiver = loan.borrower
+          quantity = Quantity loan.loanTerms.instrument loan.loanTerms.amount
+      stepsUsd = stepsFromLenderUsd <> [stepsToBorrowerUsd]
   -- Settlement of lenders (bond)
+      -- Agent sends Bonds to Lenders.
   let stepsBond = (Map.toList loan.participantsWithAmounts) <&> \(lender, investAmount) ->
         Step with
           sender = loan.borrower
@@ -106,12 +117,12 @@ settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactor
   routedSteps <- exercise routeProviderCid RouteProvider.Discover with
     discoverors = Set.fromList $ lendersAndBorrowers
     contextId = None
-    steps = stepsUsd ++ stepsBond
+    steps = stepsUsd <> stepsBond
 
   -- Instruct settlement
   exercise settlementFactoryCid Settlement.Instruct with
       instructors = Set.fromList $ lendersAndBorrowers
-      settlers = Set.singleton loan.borrower
+      settlers = Set.singleton loan.agent
       id = Id id
       description = "Settlement for " <> id
       contextId = None
