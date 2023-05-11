@@ -2,6 +2,7 @@ module Tests.DamlHub where
 
 import Daml.Script
 
+import Scripts.Parties
 import Tests.Common
 
 initialTestHub : LedgerParties -> Script ()

@@ -5,6 +5,7 @@ import Tests.Negative
 import Daml.Script
 
 import Scripts.Parties
+import Scripts.PreOrigination
 
 {-
 perfTestIDE : Script ()

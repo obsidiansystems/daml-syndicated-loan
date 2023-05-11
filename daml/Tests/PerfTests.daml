@@ -17,7 +17,7 @@ import Daml.Finance.Interface.Holding.Fungible (Fungible, SplitResult(..))
 import Daml.Finance.Interface.Holding.Fungible qualified as Fungible (Split(..))
 import Daml.Finance.Interface.Types.Common.Types
 
-
+import Scripts.Parties
 import Workflow.CreateAccount qualified as CreateAccount
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.Transfer qualified as Transfer

@@ -1,0 +1,108 @@
+-- | Set up scripts for parties and accounts prior to loan application and origination
+module Scripts.PreOrigination where
+
+import DA.Map qualified as Map
+import Daml.Script
+
+import Daml.Finance.Interface.Account.Factory qualified as Account (F)
+import Daml.Finance.Interface.Holding.Base qualified as HoldingBase
+import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
+import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate (F)
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
+import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
+import Daml.Finance.Interface.Types.Common.Types
+
+import Scripts.Accounts
+import Scripts.Common
+import Scripts.Factories
+import Scripts.Parties
+import Scripts.RouteProvider
+import Util.Display
+
+-- | Information required for denominating the loans
+-- and settling payments.
+data PreOrigination = PreOrigination with
+  accountFactoryCid : ContractId Account.F
+  holdingFactoryCid : ContractId Holding.F
+  fixedRateBondFactoryCid : ContractId FixedRate.F
+  settlementFactoryCid : ContractId Settlement.F
+  routeProviderCid : ContractId RouteProvider.I
+  usdInstrument : InstrumentKey
+  ledgerAccounts : LedgerAccounts
+  hortenseCashHoldingCid : ContractId HoldingBase.I
+  garyCashHoldingCid : ContractId HoldingBase.I
+  aliceCashHoldingCid : ContractId HoldingBase.I
+  charlieCashHoldingCid : ContractId HoldingBase.I
+
+-- Pre-origination set-up script that creates:
+-- - the asset in which the loans will be denominated
+-- - the issuer and depository for the asset (for simplicity, they are the same party)
+-- - the accounts for the agents, lenders, and borrowers
+-- - initial assets for the lenders
+preOrigination : LedgerParties -> Script PreOrigination
+preOrigination parties@(LedgerParties{..}) = do
+    -- USD instrument definition
+    let usdInstrument = mkUsd fed
+
+    log "-- Creating factories and routes --"
+    -- Create Factories
+    accountFactoryCid <- accountFactory fed $ allParties parties
+    holdingFactoryCid <- holdingFactory fed $ allParties parties
+    fixedRateBondFactoryCid <- fixedRateFactory agent_charlie Map.empty
+    settlementFactoryCid <- settlementFactory agent_charlie $ allParties parties
+
+    -- Create Route Provider
+    routeProviderCid <- createRouteProvider borrower_alice (allParties parties)
+      [ ("LoanInstrument", borrower_alice)
+      , ("USD", fed)
+      ]
+
+    log "-- Creating accounts --"
+    let mkCashAccount = makeAndFundAccount fed usdInstrument accountFactoryCid holdingFactoryCid
+    let makeLoanAccount = makeAccount "Loan" accountFactoryCid holdingFactoryCid
+
+    -- Hortense's USD account
+    (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense 100_000_000.00
+    -- Hortense's loan account
+    hortenseLoanAccount <- makeLoanAccount lender_hortense borrower_alice
+
+    -- Gary's USD account
+    (garyAccount, Some garyCashHoldingCid) <- mkCashAccount lender_gary 70_000_000.00
+    -- Gary's loan account
+    garyLoanAccount <- makeLoanAccount lender_gary borrower_alice
+
+    -- Rue's USD account
+    (_rueAccount, Some _rueCashHoldingCid) <- mkCashAccount lender_rue 70_000_000.00
+    -- Rue's loan account
+    _rueLoanAccount <- makeLoanAccount lender_rue borrower_alice
+
+    -- ...for Alice's Company
+    -- Bob's USD account
+    (bobAccount, None) <- mkCashAccount borrower_bob 0.0
+
+    -- Alice's USD account
+    (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice 10_000_000.00
+    -- Alices's loan account
+    aliceLoanAccount <- makeLoanAccount borrower_alice borrower_alice
+
+    -- ...for Charlie's agency
+    (charlieAccount, Some charlieCashHoldingCid) <- mkCashAccount agent_charlie 6_000_000_000.00
+    -- Charlies's bond account (request)
+    charlieLoanAccount <- makeLoanAccount agent_charlie borrower_alice
+
+    -- Debbie's USD account
+    (debbieAccount, None) <- mkCashAccount agent_debbie 0.0
+
+    let ledgerAccounts = LedgerAccounts with ..
+    return $ PreOrigination with
+      accountFactoryCid
+      holdingFactoryCid
+      fixedRateBondFactoryCid
+      settlementFactoryCid
+      routeProviderCid
+      usdInstrument
+      ledgerAccounts
+      hortenseCashHoldingCid
+      garyCashHoldingCid
+      aliceCashHoldingCid
+      charlieCashHoldingCid
