@@ -256,7 +256,7 @@ data OriginationSettlement = OriginationSettlement with
   lenderGaryBondHolding : ContractId Fungible.Fungible
   lenderHortenseBondHolding : ContractId Fungible.Fungible
 
-settleLoan : LedgerParties -> PreOrigination -> Origination -> Script OriginationSettlement
+settleLoan : LedgerParties -> PreOrigination -> Origination -> Script ()
 settleLoan LedgerParties {..} PreOrigination{..} origination = do
   -- Generate Settlement Proposal
   settlementProposalCid <- submit agent_charlie do
@@ -311,7 +311,6 @@ settleLoan LedgerParties {..} PreOrigination{..} origination = do
         , ((lender_hortense, bondCurrency), Some hortenseCashHoldingCid)
         , ((borrower_alice, bondKey), Some aliceBondHoldingKey)
         , ((agent_charlie, bondCurrency), Some charlieCashHoldingCid)
-        -- , ((agent_charlie, bondKey), Some ledgerAccounts.charlieLoanAccount)
         ]
 
       f (accum, map') (icid, routedStep) = do
@@ -369,68 +368,7 @@ settleLoan LedgerParties {..} PreOrigination{..} origination = do
         actors = Set.singleton approvingParty
         approval = TakeDelivery approvingPartyAccount
 
-  -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
-  settlementBases <- submit agent_charlie do
+  _ <- submit agent_charlie do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
-  -- Pick out each party's holdings from the list of returned contract id's
-  let settlementFungibleCids : [ContractId Fungible.Fungible]
-      settlementFungibleCids = fromInterfaceContractId @Fungible.Fungible <$> settlementBases
-      settlementParties = [borrower_alice, lender_gary, lender_hortense]
-
-  fungibles <- filter ((`Prelude.elem` settlementFungibleCids) . fst) . mconcat <$>
-    forA settlementParties (query @Fungible.Fungible)
-
-  let settlementFungibleMap : Map.Map Party [(ContractId Fungible.Fungible, Fungible.Fungible)] -- Owner to fungibles
-      settlementFungibleMap =
-        createFungiblesMap
-          (map L.head $ L.groupOn fst $ L.sortOn fst fungibles) -- We need to do deduplicate since a "query" by two different parties may return the same contract (if it's visible by multiple parties)
-
-  borrowerAliceUsdHolding' : NonEmpty (ContractId Fungible.Fungible, Fungible.Fungible) <- lookupNonEmptyUsdHoldings borrower_alice settlementFungibleMap
-  lenderGaryBondHolding' : (ContractId Fungible.Fungible, Fungible.Fungible) <- lookupSingleBondHolding lender_gary settlementFungibleMap
-  lenderHortenseBondHolding' : (ContractId Fungible.Fungible, Fungible.Fungible) <- lookupSingleBondHolding lender_hortense settlementFungibleMap
-
-  return $ OriginationSettlement with
-    borrowerAliceUsdHolding = fst <$> borrowerAliceUsdHolding'
-    lenderGaryBondHolding = fst lenderGaryBondHolding'
-    lenderHortenseBondHolding = fst lenderHortenseBondHolding'
-  where
-    createFungiblesMap
-      : [(a, Fungible.Fungible)]
-      -> Map.Map Party [(a, Fungible.Fungible)] -- Owner to fungibles
-    createFungiblesMap fungiblesList =
-      Map.fromListWith (++) $ fungiblesList <&> \(a, fungible) ->
-        (fungible.account.owner, [(a, fungible)])
-
-    lookupNonEmptyUsdHoldings : Show a => Party -> Map Party [(a, Fungible.Fungible)] -> Script (NonEmpty (a, Fungible.Fungible))
-    lookupNonEmptyUsdHoldings party settlementFungibleMap =
-      let bondCurrency = origination.origLoanAgreement.bondInstrument.fixedRate.currency
-      in optional
-        (fail $ show party <> " not found in settlementFungibleMap: " <> show settlementFungibleMap)
-        (\values ->
-          optional
-            (fail $ show party <> " has no holdings of " <> show bondCurrency)
-            pure
-            (NE.nonEmpty $ filter ((== bondCurrency) . (.instrument) . snd) values)
-        )
-        (Map.lookup party settlementFungibleMap)
-
-    lookupSingleBondHolding
-      :  ActionFail m
-      => Show a
-      => Party
-      -> Map.Map Party [(a, Fungible.Fungible)]
-      -> m (a, Fungible.Fungible)
-    lookupSingleBondHolding party settlementFungibleMap = optional
-      (fail $ show party <> " not found in settlementFungibleMap: " <> show settlementFungibleMap)
-      (\values ->
-        optional
-          (fail $ show party <> " has no bond holdings")
-          (\nonEmptyBondsList ->
-            if Prelude.length (NE.toList nonEmptyBondsList) == 1
-              then pure $ L.head $ NE.toList nonEmptyBondsList
-              else fail $ "Expected " <> show party <> " to hold exactly one Alice-bond. Found: " <> show (NE.toList nonEmptyBondsList)
-          )
-          (NE.nonEmpty $ filter ((== origination.origLoanAgreement.bondKey) . (.instrument) . snd) values)
-      )
-      (Map.lookup party settlementFungibleMap)
+  pure ()
