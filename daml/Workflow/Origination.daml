@@ -19,6 +19,7 @@ module Workflow.Origination
   , LoanAgreement(..)
   , LoanApplicationSubmission(..)
   , LoanApplicationData(..)
+  , LoanApplicationProcess(..)
   , LoanApplicationProcess_CreatePendingLoanAgreement(..)
   , LoanApplicationProcess_CreateUnderwritingRequest(..)
   , LoanApplicationProcess_OfferMandateLetter(..)

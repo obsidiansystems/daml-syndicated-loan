@@ -2,9 +2,6 @@ module Scripts.Origination where
 
 import DA.Date (date, toGregorian, toDateUTC)
 import DA.Foldable
-import DA.List qualified as L
-import DA.Map (Map)
-import DA.Map qualified as Map
 import Daml.Script
 
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))

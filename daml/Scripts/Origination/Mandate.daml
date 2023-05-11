@@ -5,6 +5,12 @@ import Daml.Script
 import Util.Display
 import Workflow.Origination
 
+mandatePhase
+  : Party
+  -> Party
+  -> ContractId LoanApplicationProcess
+  -> ContractId UnderwritingResult
+  -> Script (ContractId AcceptedMandateLetter)
 mandatePhase agent borrower appProcess underwritingResult = do
   log "-- Mandate Phase --"
   -- Agent goes back to the borrower with a mandate letter offer

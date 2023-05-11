@@ -1,24 +1,12 @@
 module Scripts.Origination.Offer where
 
-import DA.Date (date, toGregorian, toDateUTC)
-import DA.Foldable
 import DA.List qualified as L
 import DA.Map (Map)
 import DA.Map qualified as Map
 import Daml.Script
 
-import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
-import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
-
 import Util.Display
 import Workflow.Origination
-
-import Scripts.Parties
-import Scripts.PreOrigination
-import Scripts.Origination.LoanApplication
-import Scripts.Origination.Mandate
-import Scripts.Origination.Solicitation
-import Scripts.Origination.Underwriting
 
 makeOffer
   : LoanApplicationSubmission

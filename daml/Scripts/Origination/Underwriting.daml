@@ -5,6 +5,7 @@ import Daml.Script
 import Util.Display
 import Workflow.Origination
 
+preMandateProcessing : ContractId AcceptedLoanApplication -> Party -> Party -> Script (ContractId LoanApplicationProcess, ContractId UnderwritingResult)
 preMandateProcessing acceptedApp agent underwriter = do
   log "-- Pre-Mandate Application Processing --"
   -- Agent kicks off the loan application process
