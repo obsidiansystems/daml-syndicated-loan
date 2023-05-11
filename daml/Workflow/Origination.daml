@@ -4,8 +4,10 @@ module Workflow.Origination
   , AcceptedLoanApplication(..)
   , AcceptedLoanApplication_StartProcess(..)
   , AcceptedMandateLetter(..)
+  , AcceptedMandateLetter_Burn(..)
   , AcceptedMandateLetter_CreateOffer(..)
   , AcceptedMandateLetter_CreateToken(..)
+  , AcceptedMandateLetterToken_Burn(..)
   , CreateUnderwritingResult(..)
   , FundingInterest(..)
   , FundingInterest_Decline(..)
@@ -230,6 +232,7 @@ template LoanApplicationProcess
             participantsWithAmounts = Map.fromList lenderCommitments
             uuid = acceptedLoanOffer.uuid
             prospectus = acceptedLoanOffer.mandateLetter.mandateLetter.prospectus
+          applicationCid
           signed = []
         signedByBorrower <- exercise borrower_commitment $ AcceptedLoanOffer_SignAgreement with
           pendingAgreementCid
@@ -361,6 +364,10 @@ template AcceptedMandateLetter
     mandateLetter : MandateLetter
   where
     signatory agent, borrower
+    choice AcceptedMandateLetter_Burn : ()
+      controller agent
+      do
+        pure ()
     nonconsuming choice AcceptedMandateLetter_CreateOffer : ContractId SyndicatedLoanOffer
       with
         rate : RatePerAnnum
@@ -392,6 +399,10 @@ template AcceptedMandateLetterToken
     reportCid : ContractId UnderwritingResult
   where
     signatory borrower, agent
+    choice AcceptedMandateLetterToken_Burn : ()
+      controller agent
+      do
+        pure ()
 
 -- | This template represents a signed underwriting report that is being shared with a prospective lender.
 -- The agent cannot request funding from a lender without providing this information. It is a separate template
@@ -463,7 +474,8 @@ template FundingRequest
           agent
           uuid
           participant
-          instrument = report.instrument
+          reportCid
+          report
           amount
           rate
 
@@ -473,7 +485,8 @@ template FundingInterest
     agent : Party
     uuid : Text
     participant : Party
-    instrument : InstrumentKey
+    reportCid : ContractId UnderwritingDisclosure
+    report : UnderwritingReport
     amount : Decimal
     rate : RatePerAnnum
     -- TODO: for now we just reject offers that are greater than LoanApplication.maxInterestRate, but eventually we'd like to accept all offers that makes it possible for the agent to offer a final loan of less than or equal to LoanApplication.maxInterestRate.
@@ -493,6 +506,12 @@ template FundingInterest
       do
         pendingAgreement <- fetch agreementCid
         let loanAgreement = pendingAgreement.loanAgreement
+        fetchedDisclosure <- fetch reportCid
+        assertMsg "Report does not match referenced report" $ fetchedDisclosure.report == this.report
+        fetchedReport <- fetch fetchedDisclosure.reportCid
+        assertMsg "Disclosed report does not match original report" $ fetchedReport.report == fetchedDisclosure.report
+        fetchedApplication <- fetch pendingAgreement.applicationCid
+        assertMsg "Report application does not match referenced application" $ fetchedApplication == fetchedReport.application
         case Map.lookup this.participant loanAgreement.participantsWithAmounts of
           None -> fail "Loan terms do not include this lender"
           Some myAmount -> do
@@ -573,6 +592,7 @@ template LoanAgreement
 template PendingLoanAgreement
   with
     loanAgreement : LoanAgreement
+    applicationCid : ContractId AcceptedLoanApplication
     signed : [Party]
   where
     -- TODO: ensure clause
@@ -593,6 +613,7 @@ template PendingLoanAgreement
         fixedRateBondFactoryCid : ContractId FixedRate.F
       controller loanAgreement.agent
       do
+        archive applicationCid
         let bondInstrument = loanAgreementToBondCreate now this.loanAgreement.loanTerms.instrument this.loanAgreement
         bondCid <- exercise fixedRateBondFactoryCid bondInstrument
         let bondKey = InstrumentKey with
