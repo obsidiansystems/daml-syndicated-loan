@@ -58,3 +58,5 @@ failedUnderwriting = Tests.FailedUnderwriting.failedUnderwriting
 -- | Negative tests, including tests of privacy invariants and exercise rights
 runNegativeTests : Script ()
 runNegativeTests = negativeTestIDE
+
+-- Note: Some divulgence warnings appear at the end of this file.  These are caused by tests that check whether incorrect divulgence has occurred.
