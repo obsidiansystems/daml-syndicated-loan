@@ -2,12 +2,13 @@
 module Util.Display where
 
 import Daml.Script
-import qualified DA.Text as T
-import qualified DA.Set as Set
+import DA.Text qualified as T
+import DA.Set qualified as Set
 
 import qualified Daml.Finance.Settlement.Batch as Batch
 import qualified Daml.Finance.Interface.Settlement.Types as Settlement
 import Daml.Finance.Interface.Types.Common.Types
+import Daml.Finance.Interface.Types.Date.Schedule (PeriodicSchedule(..), ScheduleFrequency(..))
 
 -- | Converts a datatype into a human-readable string. Emphasis should be placed
 -- on readability, so instances will often produce multiline strings.
@@ -22,12 +23,22 @@ log = debugRaw . ("\n"<>) . display -- We use debugRaw to ensure newlines cause 
 logSome : Display a => Text -> Optional a -> Script ()
 logSome fallback = log . optional fallback display
 
--- | Fetch a contract by ID from the ledger and log it
-logLedger
+-- | Fetch a contract by ID from the ledger and log it, or log a fallback message if it isn't found.
+logSomeLedger
    : (Display a, HasTemplateTypeRep a, HasToAnyTemplate a, HasFromAnyTemplate a, HasAgreement a)
    => Party -> Text -> ContractId a -> Script ()
-logLedger party fallback cid = do
+logSomeLedger party fallback cid = do
   logSome fallback =<< queryContractId party cid
+
+-- | Fetch a contract by ID from the ledger and log it. Fails if the contract isn't found.
+logLedger
+   : (Display a, HasTemplateTypeRep a, HasToAnyTemplate a, HasFromAnyTemplate a, HasAgreement a)
+   => Party -> ContractId a -> Script ()
+logLedger party cid = do
+  a <- queryContractId party cid
+  case a of
+    None -> fail $ "Could not find contract id " <> show cid <> " with party " <> show party
+    Some a' -> log a'
 
 showLedger
    : (HasTemplateTypeRep a, HasToAnyTemplate a, HasFromAnyTemplate a, HasAgreement a, Show a)
@@ -36,11 +47,11 @@ showLedger party fallback cid = do
   logSome fallback . fmap show =<< queryContractId party cid
 
 instance Display Batch.Batch where
- display b = T.intercalate "\n" $ 
+ display b = T.intercalate "\n" $
     [ "Batch: " <> show b.id <> " " <> b.description
     , "> Requestors: " <> show (Set.toList  b.requestors)
     , "> Settlers: " <> show (Set.toList b.settlers)
-    , "> Settlement time: " <> optional "N/A" show b.settlementTime 
+    , "> Settlement time: " <> optional "N/A" show b.settlementTime
     , "> Routed steps: " <> show (length b.routedStepsWithInstructionId)
     ] <> map (display . fst) b.routedStepsWithInstructionId
 
@@ -54,13 +65,22 @@ instance Display Settlement.RoutedStep where
     , "->"
     , show r.receiver
     , "-"
-    , show r.quantity.amount
+    , display r.quantity.amount
     , display r.quantity.unit
     , "(Custod. " <> show r.custodian <> ")"
     ]
 
+commaSplits : Text -> Text
+commaSplits x = case T.splitAt 3 x of
+  (chunk, "") -> chunk
+  (chunk, remainder) -> chunk <> "," <> commaSplits remainder
+
 instance Display Decimal where
-  display = show
+  display a =
+    let x = show a
+        nums = T.reverse $ commaSplits $ T.reverse $ T.takeWhile (/=".") x
+        decs = T.dropWhile (/=".") x
+    in nums <> (if T.length decs == 2 then decs <> "0" else decs)
 
 instance Display InstrumentKey where
   display a = show a.id <> " v" <> (T.take 4 a.version)
@@ -72,3 +92,17 @@ instance Display AccountKey where
 displayLinesWith : Display a => (Text -> Text) -> a -> [Text]
 displayLinesWith f a =
   (map f (T.lines $ display a))
+
+displayIndent : Display a => a -> [Text]
+displayIndent = displayLinesWith ("> "<>)
+
+instance Display (ContractId a) where
+  display = T.take 4 . show
+
+instance Display PeriodicSchedule where
+  display a = case a.frequency of
+    SinglePeriod -> "Single period"
+    Periodic freq -> show freq.period.periodMultiplier
+      <> " times per "
+      <> show freq.period.period
+      <> " on " <> show freq.rollConvention

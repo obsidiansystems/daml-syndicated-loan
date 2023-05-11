@@ -140,7 +140,7 @@ instance Display LoanApplicationData where
 
 -- | This template represents a loan application that has been accepted by an agent.
 -- This will be used as a reference throughout the application workflow as evidence that
--- the agent has commited to processing the application that the borrower has authorized.
+-- the agent has committed to processing the application that the borrower has authorized.
 template AcceptedLoanApplication
   with
     borrower : Party
@@ -243,6 +243,11 @@ template LoanApplicationProcess
 
 
 
+instance Display LoanApplicationProcess where
+  display a = T.intercalate "\n" $
+    (show a.agent <> " is processing application " <> display a.applicationCid <> " from " <> show a.borrower) ::
+      displayLinesWith ("> " <>) a.application.applicationData
+
 template UnderwritingRequest
   with
     underwriter : Party
@@ -278,6 +283,11 @@ template UnderwritingRequest
             prospectus = this.application.applicationData.prospectus
           result
 
+instance Display UnderwritingRequest where
+  display a = T.intercalate "\n" $
+    (show a.underwriter <> " receives underwriting request " <> display a.applicationCid) ::
+      displayLinesWith ("> " <>) a.application.applicationData
+
 -- | This template represents the result of an underwriting report signed by an underwriter
 template UnderwritingResult
   with
@@ -307,6 +317,12 @@ template UnderwritingResult
           report = this.report
           participant = disclose_to
 
+instance Display UnderwritingResult where
+  display a = T.intercalate "\n" $
+    let passfail = if a.result then "PASSING" else "FAILING"
+    in (show a.underwriter <> " submits " <> passfail <> " underwriting result for " <> display a.applicationCid) ::
+        displayLinesWith ("> "<>) a.report
+
 -- | This represents the information about the loan application that the underwriter has determined
 data UnderwritingReport = UnderwritingReport with
     instrument : InstrumentKey
@@ -317,6 +333,16 @@ data UnderwritingReport = UnderwritingReport with
     prospectus : Text
   deriving (Eq, Ord, Show)
 
+instance Display UnderwritingReport where
+  display a = "Request: "
+    <> display a.amount
+    <> " of "
+    <> display a.instrument
+    <> " at "
+    <> display a.maxInterestRate
+    <> " for "
+    <> show a.durationYears <> " years"
+
 -- | The information from the Underwriter's report on the application that will be shared with the applicant.
 data MandateLetter = MandateLetter
   with
@@ -326,6 +352,12 @@ data MandateLetter = MandateLetter
     -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
     prospectus : Text
   deriving (Eq, Ord, Show)
+
+instance Display MandateLetter where
+  display a = T.intercalate "\n"
+    [ "Terms: " <> display a.amount <> " of " <> display a.instrument <> " for " <> show a.durationYears <> "y"
+    , "Prospectus: " <> a.prospectus
+    ]
 
 -- | This template represents an offer from the agent to a borrower to continue the loan application process under
 -- the provided terms. The underwriter has vouched for the legitimacy of this mandate letter, but we do not
@@ -349,6 +381,11 @@ template MandateLetterOffer
       controller borrower
       do
         pure ()
+
+instance Display MandateLetterOffer where
+  display a = T.intercalate "\n" $
+    (show a.agent <> " sends mandate letter to " <> show a.borrower <> " for application " <> display a.applicationCid) ::
+      displayIndent a.mandateLetter
 
 -- | This template represents a mandate letter that has been offered by the agent to the borrower,
 -- and accepted by the borrower. It represents on-chain the consent of the borrower for the agent to reach out to lenders
@@ -394,6 +431,12 @@ template AcceptedMandateLetterToken
   where
     signatory borrower, agent
 
+instance Display AcceptedMandateLetter where
+  display a = T.intercalate "\n" $
+    (show a.borrower <> " accepts mandate letter from " <> show a.agent <> " for application " <> display a.applicationCid) ::
+      displayIndent a.mandateLetter
+
+
 -- | This template represents a signed underwriting report that is being shared with a prospective lender.
 -- The agent cannot request funding from a lender without providing this information. It is a separate template
 -- to maintain the privacy of the borrower until it is appropriate to reveal their identity to the relevant parties.
@@ -426,6 +469,9 @@ template UnderwritingDisclosure
           participant = requestee
           reportCid = self
           report
+
+instance Display UnderwritingDisclosure where
+  display a = "Underwriting report disclosed by " <> show a.agent <> " to " <> show a.participant
 
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
 template FundingRequest
@@ -468,6 +514,9 @@ template FundingRequest
           amount
           rate
 
+instance Display FundingRequest where
+  display a = "Funding request sent by " <> show a.agent <> " to " <> show a.participant
+
 -- | An offer by a participant to loan part (or all of) of the amount specified by the LoanApplication
 template FundingInterest
   with
@@ -504,6 +553,12 @@ template FundingInterest
             exercise agreementCid PendingLoanAgreement_Sign with
               signer = this.participant
 
+instance Display FundingInterest where
+  display a = T.intercalate "\n"
+    [ show a.participant <> " sends offer to " <> show a.agent
+    , "Terms: " <> display a.amount <> " of " <> display a.instrument <> " at " <> display a.rate
+    ]
+
 template SyndicatedLoanOffer
   with
     uuid : Text
@@ -527,6 +582,11 @@ template SyndicatedLoanOffer
           mandateLetter
           terms
 
+instance Display SyndicatedLoanOffer where
+  display a = T.intercalate "\n" $
+    (show a.mandateLetter.agent <> " sends loan offer to " <> show a.mandateLetter.borrower) ::
+      displayIndent a.mandateLetter.mandateLetter
+
 data LoanTerms = LoanTerms with
     instrument : InstrumentKey
     amount : Decimal -- Principal. TODO: for now always equal to LoanApplication.amount
@@ -537,6 +597,15 @@ data LoanTerms = LoanTerms with
     schedule : PeriodicSchedule
     -- ^ Repayment coupon schedule
       deriving (Eq, Show)
+
+instance Display LoanTerms where
+  display a =
+    "Terms: " <> display a.amount
+    <> " of " <> display a.instrument
+    <> " at " <> display a.rate
+    <> " for " <> show a.durationYears <> "y"
+    <> "\n"
+    <> "Repayment schedule: " <> display a.schedule
 
 template AcceptedLoanOffer
   with
@@ -557,6 +626,11 @@ template AcceptedLoanOffer
           this.terms == pendingTerms
         exercise pendingAgreementCid PendingLoanAgreement_Sign with
           signer = this.mandateLetter.borrower
+
+instance Display AcceptedLoanOffer where
+  display a = T.intercalate "\n" $
+    (show a.mandateLetter.borrower <> " accepted loan offer from " <> show a.mandateLetter.agent) ::
+      displayIndent a.terms
 
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
 template LoanAgreement
