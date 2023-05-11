@@ -1,5 +1,6 @@
 module Tests.Common where
 
+import DA.Action
 import Daml.Script
 
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
@@ -10,6 +11,8 @@ import Scripts.Origination
 import Scripts.Origination.Settlement
 import Scripts.PreOrigination
 import Scripts.Parties
+
+import Util.Display
 
 data Config = Config with
   instrument : InstrumentKey
@@ -24,5 +27,18 @@ initialTest parties = do
   preOriginationResult <- preOrigination parties
   originationResult : Origination <- originate parties preOriginationResult
   _originationSettlement <- settleLoan parties preOriginationResult originationResult
-  -- servicing parties originationData
   pure ()
+
+-- | Describe a test and indicate whether it has passed. Errors running the
+-- Script action will halt execution as usual. The trace will show what
+-- test was running when the script failed.
+test : Text -> Script a -> Script a
+test msg f = do
+    debugRaw $ "Test: " <> msg <> "..."
+    a <- f
+    debugRaw "PASSED"
+    pure a
+
+-- | Assert that a given property is true
+property : Text -> Bool -> Script ()
+property msg cond = test msg $ unless cond $ assertFail "FAILED"
