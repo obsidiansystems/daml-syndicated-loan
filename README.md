@@ -45,7 +45,7 @@ This example can be extended in a number of ways, including:
 
 ### References
 
-!["Tombstone" of a syndicated loan](./doc/tombstone.png)
+[<img src="./doc/tombstone.png" alt="Announcement or *tombstone* of a syndicated loan" width="300"/>](./doc/tombstone.png)
 
 - [Syndicated Lending: Practice and Documentation](https://financialmarketstoolkit.cliffordchance.com/en/financial-markets-resources/resources-by-type/guides/syndicated-lending-7th-edition--december-2019-.html)
 - [Syndicated Lending (Essential Capital Markets)](https://www.elsevier.com/books/syndicated-lending/fight/978-0-7506-5907-9)
