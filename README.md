@@ -24,6 +24,8 @@ A basic syndicated loan involves the following primary parties:
 
 This application models loan origination and servicing.
 
+![Lending and Servicing Workflow](./flowchart.png)
+
 
 # Code Samples - Getting Started
 
