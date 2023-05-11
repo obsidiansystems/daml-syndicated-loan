@@ -42,8 +42,14 @@ This example can be extended in a number of ways, including:
 * Adding agent fees
 * Modeling covenants and loan modifications/acceleration on covenant breach
 * Modeling interest rate modifications (either due to variable rate or as a consequence of contractual terms)
+* More complex disbursements, e.g. triggered by drawing requests and/or conditions (like in a construction loan)
+* Loans in which the identities of the lenders remain private, e.g. for crowdfunding
+* Actions which lenders can perform by voting
+* Multi-tranche loans
 
 ### References
+
+[<img src="./doc/tombstone.png" alt="Announcement or *tombstone* of a syndicated loan" width="300"/>](./doc/tombstone.png)
 
 - [Syndicated Lending: Practice and Documentation](https://financialmarketstoolkit.cliffordchance.com/en/financial-markets-resources/resources-by-type/guides/syndicated-lending-7th-edition--december-2019-.html)
 - [Syndicated Lending (Essential Capital Markets)](https://www.elsevier.com/books/syndicated-lending/fight/978-0-7506-5907-9)

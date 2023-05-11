@@ -50,12 +50,6 @@ runBondSteps p po agent startTime currentOriginatedLoanAgreement yearNum maxYear
       else pure result
     None -> pure None
 
--- | Test script that
--- 1. executes the `runTransfer` script
--- 2. creates a token instrument
--- 3. credits a token holding to Alice in her bank account
--- 4. atomically exchanges the token against the cash holding
-
 runBondStep : LedgerParties -> PreOrigination -> Party -> ContractId OriginatedLoanAgreement -> Date -> Script (Optional (ContractId OriginatedLoanAgreement))
 runBondStep LedgerParties{..} PreOrigination{..} agent origLoanAgreementCid today = do
   log "-- Servicing: Running Repayment Step --"
