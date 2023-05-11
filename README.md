@@ -45,6 +45,7 @@ This example can be extended in a number of ways, including:
 * More complex disbursements, e.g. triggered by drawing requests and/or conditions (like in a construction loan)
 * Loans in which the identities of the lenders remain private, e.g. for crowdfunding
 * Actions which lenders can perform by voting
+* Multi-tranche loans
 
 ### References
 
