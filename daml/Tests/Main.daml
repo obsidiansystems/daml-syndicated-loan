@@ -31,4 +31,5 @@ runServicing = do
   (p, po, o) <- runOrigination
   settleLoan p po o
   let agent = o.origLoanAgreement.loanAgreement.agent
-  runBondSteps p po agent o.originationTime o.origLoanAgreementCid 1 2
+      maxSteps = 50
+  runBondSteps p po agent o.originationTime o.origLoanAgreementCid 1 maxSteps
