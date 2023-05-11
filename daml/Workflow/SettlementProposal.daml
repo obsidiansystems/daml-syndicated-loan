@@ -68,9 +68,10 @@ template SettlementProposal
         batchCid : ContractId Batch.I
       controller loan.loanAgreement.agent
       do
-        -- TODO: Check to make sure all signatures are in place
+        let allParties = loan.loanAgreement.borrower :: Map.keys loan.loanAgreement.participantsWithAmounts
+        assertMsg "All signatures must be received before executing settlement." $ sort sigAccumulator ==  (sort allParties)
         exercise batchCid Batch.Settle with
-          actors = Set.singleton loan.loanAgreement.borrower
+          actors = Set.singleton loan.loanAgreement.agent
 
 settleTransactions :
   (HasField "agent" r1 Party
@@ -121,7 +122,7 @@ settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactor
   -- Instruct settlement
   exercise settlementFactoryCid Settlement.Instruct with
       instructors = Set.fromList $ lendersAndBorrowers
-      settlers = Set.singleton loan.borrower
+      settlers = Set.singleton loan.agent
       id = Id id
       description = "Settlement for " <> id
       contextId = None

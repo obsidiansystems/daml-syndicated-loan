@@ -3,8 +3,8 @@ module Tests.Negative where
 import DA.Date
 import DA.Foldable
 import DA.Set qualified as Set
-import Daml.Script
 
+import Daml.Script
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
 
@@ -36,25 +36,6 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
             borrower = borrower_alice
             agent = agent_charlie
             applicationData = aliceApplicationData
-
-{-
-        bobApplicationData = LoanApplicationData with
-          instrument = usdInstrument
-          amount = 98_765_432.00
-          maxInterestRate = RatePerAnnum 0.07 -- 7% per annum
-          prospectus = "To break the syndicated loans framework >:)"
-          durationYears = 7
-
-        bobLoanApplication1 = LoanApplicationSubmission with
-            borrower = borrower_bob
-            agent = agent_debbie
-            applicationData = bobApplicationData
-
-        bobLoanApplication2 = LoanApplicationSubmission with
-            borrower = borrower_bob
-            agent = agent_debbie
-            applicationData = bobApplicationData
--}
 
     -- Workflow for Alice to submit a loan
     -- Bob cannot submit an application for Alice
@@ -153,6 +134,15 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- Now that Charlie has some funding interest, they can construct a book and propose a loan to alice
     -- Note that this will likely be done OFF ledger.
     let FundingSelection{..} = selectFundingInterests aliceLoanApplication fundingInterests
+
+    -- Charlie makes an offer to Alice that meets both Alice's requirements, and those of the lenders
+    aliceLoanOfferCid <- testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_CreateOffer with
+        rate = fundingSelection_ratePerAnnum
+    -- At this point, only the agent and the borrower are aware of the loan offer
+    testVisibility ps [borrower_alice, agent_charlie] aliceLoanOfferCid
+    -- Even when Alice accepts the loan offer, it is not yet visible to other parties.
+    aliceAcceptedLoanOfferCid <- testExercise ps borrower_alice aliceLoanOfferCid SyndicatedLoanOffer_Accept
+    testVisibility ps [borrower_alice, agent_charlie] aliceAcceptedLoanOfferCid
     pure ()
 
 
