@@ -1,7 +1,6 @@
 module Tests.Common
   ( LedgerParties(..)
   , PreOriginationStuff(..)
-  , OriginationSettlement(..)
   , FundingSelection(..)
   , initialTest
   , preOrigination
@@ -23,7 +22,7 @@ import DA.Date (date, toGregorian, toDateUTC)
 import DA.Foldable
 import DA.Functor
 import DA.List qualified as L
-import DA.List.Total qualified 
+import DA.List.Total qualified
 import DA.Map (Map)
 import DA.Map qualified as Map
 import DA.NonEmpty (NonEmpty)
@@ -97,7 +96,7 @@ data PreOriginationStuff = PreOriginationStuff with
 preOrigination : LedgerParties -> Script PreOriginationStuff
 preOrigination parties@(LedgerParties{..}) = do
     -- USD instrument definition
-    let usdInstrument = mkUsd fed 
+    let usdInstrument = mkUsd fed
 
     -- Create Factories
     accountFactoryCid <- accountFactory fed $ allParties parties
@@ -248,7 +247,7 @@ originationStep LedgerParties{..} PreOriginationStuff{..} = do
     lender_commitments = fundingSelection_selected
   -- Agent declines leftover funding interests
   forA_ fundingSelection_declined $ \declinedCid -> submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
-  
+
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   origLoanAgreementCid <- submit agent_charlie $ exerciseCmd signedPendingLoanAgreement PendingLoanAgreement_Finalize
     with
@@ -341,12 +340,7 @@ acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (Contract
 acceptLoanProposal borrower offerCid = do
   submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
-data OriginationSettlement = OriginationSettlement with
-  borrowerAliceUsdHolding : NonEmpty (ContractId Fungible.Fungible)
-  lenderGaryBondHolding : ContractId Fungible.Fungible
-  lenderHortenseBondHolding : ContractId Fungible.Fungible
-
-settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script OriginationSettlement
+settleLoan : LedgerParties -> PreOriginationStuff -> Origination -> Script ()
 settleLoan LedgerParties {..} preOriginationStuff origination = do
   -- Generate Settlement Proposal
   settlementProposalCid <- submit agent_charlie do
@@ -460,30 +454,10 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         approval = TakeDelivery approvingPartyAccount
 
   -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
-  settlementBases <- submit agent_charlie do
+  _ <- submit agent_charlie do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
-  -- Pick out each party's holdings from the list of returned contract id's
-  let settlementFungibleCids : [ContractId Fungible.Fungible]
-      settlementFungibleCids = fromInterfaceContractId @Fungible.Fungible <$> settlementBases
-      settlementParties = [borrower_alice, lender_gary, lender_hortense]
-
-  fungibles <- filter ((`Prelude.elem` settlementFungibleCids) . fst) . mconcat <$>
-    forA settlementParties (query @Fungible.Fungible)
-
-  let settlementFungibleMap : Map.Map Party [(ContractId Fungible.Fungible, Fungible.Fungible)] -- Owner to fungibles
-      settlementFungibleMap =
-        createFungiblesMap
-          (map L.head $ L.groupOn fst $ L.sortOn fst fungibles) -- We need to do deduplicate since a "query" by two different parties may return the same contract (if it's visible by multiple parties)
-
-  borrowerAliceUsdHolding' : NonEmpty (ContractId Fungible.Fungible, Fungible.Fungible) <- lookupNonEmptyUsdHoldings borrower_alice settlementFungibleMap
-  lenderGaryBondHolding' : (ContractId Fungible.Fungible, Fungible.Fungible) <- lookupSingleBondHolding lender_gary settlementFungibleMap
-  lenderHortenseBondHolding' : (ContractId Fungible.Fungible, Fungible.Fungible) <- lookupSingleBondHolding lender_hortense settlementFungibleMap
-
-  return $ OriginationSettlement with
-    borrowerAliceUsdHolding = fst <$> borrowerAliceUsdHolding'
-    lenderGaryBondHolding = fst lenderGaryBondHolding'
-    lenderHortenseBondHolding = fst lenderHortenseBondHolding'
+  pure ()
   where
     createFungiblesMap
       : [(a, Fungible.Fungible)]
