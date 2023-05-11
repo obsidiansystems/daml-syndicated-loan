@@ -1,6 +1,7 @@
 module Tests.Main where
 
 import DA.Date (Month(..), date)
+import DA.Set qualified as Set
 import DA.Time (time)
 import Daml.Script
 
@@ -12,6 +13,7 @@ import Scripts.Settlement
 import qualified Tests.FailedUnderwriting
 
 import Tests.IDE (negativeTestIDE)
+import Tests.Util
 import Util.Display
 
 -- | Creates parties
@@ -47,10 +49,12 @@ runServicing = do
   settleLoan p po o
   let agent = o.origLoanAgreement.loanAgreement.agent
       maxSteps = 3
+  Some holdingToBurn <- getHoldingOfAmount po.ledgerAccounts.aliceAccount po.usdInstrument (Some 28_500_000.0) Set.empty
+  submitMulti [p.fed, p.borrower_alice] [] $ archiveCmd holdingToBurn
   runBondSteps p po agent o.originationTime o.origLoanAgreementCid 1 maxSteps >>= \case
     None -> log "-- Repayment Complete --"
     Some _ -> pure ()
-
+  
 -- | Negative underwriting result
 failedUnderwriting : Script ()
 failedUnderwriting = Tests.FailedUnderwriting.failedUnderwriting

@@ -137,11 +137,18 @@ processLenderClaim LenderClaimConfig{..} = do
             --Note: It would be better to allocate all holdings in one shot above
             allHoldings <- Util.getAccountHoldings borrowerCashAccount instruction.routedStep.quantity.unit
             let ignored = Set.fromList $ fst <$> filter ((/=Map.empty) . (.observers) . snd) allHoldings
-            Some borrowerCashUsed <- Util.getHoldingOfAmount
+            splitResult <- Util.getHoldingOfAmount
               borrowerCashAccount
               instruction.routedStep.quantity.unit
               (Some instruction.routedStep.quantity.amount)
               ignored
+            borrowerCashUsed <- case splitResult of
+              None -> do
+                log $ "-- Insufficient funds --"
+                log $ "> Borrower didn't have $" <> show instruction.routedStep.quantity.amount <> " for payment."
+                fail "Test ended with insufficient funds."
+              Some fundsCid ->
+                return fundsCid
 
             (instructionCid2, _) <- submit borrower $ exerciseCmd instructionCid Instruction.Allocate with
               actors = Set.fromList [borrower]
