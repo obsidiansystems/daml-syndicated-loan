@@ -575,7 +575,7 @@ template FundingInterest
 instance Display FundingInterest where
   display a = T.intercalate "\n"
     [ show a.participant <> " sends offer to " <> show a.agent
-    , "Terms: " <> display a.amount <> " of " <> display a.instrument <> " at " <> display a.rate
+    , "Terms: " <> display a.amount <> " of " <> display a.report.instrument <> " at " <> display a.rate
     ]
 
 template SyndicatedLoanOffer
