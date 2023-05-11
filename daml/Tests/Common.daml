@@ -257,6 +257,7 @@ originationStep LedgerParties{..} PreOrigination{..} = do
   loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter fundingSelection_ratePerAnnum
   logLedger agent_charlie loanProposal
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
+  logLedger borrower_alice acceptedLoan
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
   signedPendingLoanAgreement <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_CreatePendingLoanAgreement with

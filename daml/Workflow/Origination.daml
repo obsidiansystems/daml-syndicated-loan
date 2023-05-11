@@ -597,6 +597,15 @@ data LoanTerms = LoanTerms with
     -- ^ Repayment coupon schedule
       deriving (Eq, Show)
 
+instance Display LoanTerms where
+  display a =
+    "Terms: " <> display a.amount
+    <> " of " <> display a.instrument
+    <> " at " <> display a.rate
+    <> " for " <> show a.durationYears <> "y"
+    <> "\n"
+    <> "Repayment schedule: " <> display a.schedule
+
 template AcceptedLoanOffer
   with
     uuid : Text
@@ -616,6 +625,11 @@ template AcceptedLoanOffer
           this.terms == pendingTerms
         exercise pendingAgreementCid PendingLoanAgreement_Sign with
           signer = this.mandateLetter.borrower
+
+instance Display AcceptedLoanOffer where
+  display a = T.intercalate "\n" $
+    (show a.mandateLetter.borrower <> " accepted loan offer from " <> show a.mandateLetter.agent) ::
+      displayIndent a.terms
 
 -- The final loan agreement should include all parties. The privacy barrier is dropped in this final step. In the bookbuilding process, no identities are revealed.
 template LoanAgreement

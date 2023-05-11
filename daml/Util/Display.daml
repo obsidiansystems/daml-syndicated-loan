@@ -9,6 +9,7 @@ import DA.List qualified as L
 import qualified Daml.Finance.Settlement.Batch as Batch
 import qualified Daml.Finance.Interface.Settlement.Types as Settlement
 import Daml.Finance.Interface.Types.Common.Types
+import Daml.Finance.Interface.Types.Date.Schedule (Frequency(..), PeriodicSchedule(..), ScheduleFrequency(..))
 
 -- | Converts a datatype into a human-readable string. Emphasis should be placed
 -- on readability, so instances will often produce multiline strings.
@@ -98,3 +99,11 @@ displayIndent = displayLinesWith ("> "<>)
 
 instance Display (ContractId a) where
   display = T.take 4 . show
+
+instance Display PeriodicSchedule where
+  display a = case a.frequency of
+    SinglePeriod -> "Single period"
+    Periodic freq -> show freq.period.periodMultiplier
+      <> " times per "
+      <> show freq.period.period
+      <> " on " <> show freq.rollConvention
