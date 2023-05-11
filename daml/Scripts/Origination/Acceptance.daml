@@ -37,8 +37,12 @@ multipartyAcceptance agent appProcess acceptedLoan fundingSelection routeCid set
     declined <- queryContractId agent declinedCid
     case declined of
       None -> pure ()
-      Some dec -> log $ show dec.agent <> " declines offer from " <> show dec.participant
-        <> "\n" <> displayFundingInterestTerms dec
+      Some dec -> do
+        disclosed <- queryContractId agent dec.reportCid
+        case disclosed of
+          None -> pure ()
+          Some dis -> log $ show dec.agent <> " declines offer from " <> show dec.participant
+                            <> "\n" <> displayFundingInterestTerms dec dis
     submit agent $ exerciseCmd declinedCid FundingInterest_Decline
 
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
