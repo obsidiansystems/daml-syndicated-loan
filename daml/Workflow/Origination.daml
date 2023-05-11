@@ -317,6 +317,12 @@ data MandateLetter = MandateLetter
     prospectus : Text
   deriving (Eq, Ord, Show)
 
+instance Display MandateLetter where
+  display a = T.intercalate "\n"
+    [ "Terms: " <> display a.amount <> " of " <> display a.instrument <> " for " <> show a.durationYears <> "y"
+    , "Prospectus: " <> a.prospectus
+    ]
+
 -- | This template represents an offer from the agent to a borrower to continue the loan application process under
 -- the provided terms. The underwriter has vouched for the legitimacy of this mandate letter, but we do not
 -- reveal their identity here. We maintain a reference to the report so that we can audit validity separately.
@@ -339,6 +345,11 @@ template MandateLetterOffer
       controller borrower
       do
         pure ()
+
+instance Display MandateLetterOffer where
+  display a = T.intercalate "\n" $
+    (show a.agent <> " sends mandate letter to " <> show a.borrower <> " for application " <> display a.applicationCid) ::
+      displayIndent a.mandateLetter
 
 -- | This template represents a mandate letter that has been offered by the agent to the borrower,
 -- and accepted by the borrower. It represents on-chain the consent of the borrower for the agent to reach out to lenders
@@ -369,6 +380,12 @@ template AcceptedMandateLetter
             rate
             durationYears = mandateLetter.durationYears
             schedule = application.applicationData.schedule
+
+instance Display AcceptedMandateLetter where
+  display a = T.intercalate "\n" $
+    (show a.borrower <> " accepts mandate letter from " <> show a.agent <> " for application " <> display a.applicationCid) ::
+      displayIndent a.mandateLetter
+
 
 -- | This template represents a signed underwriting report that is being shared with a prospective lender.
 -- The agent cannot request funding from a lender without providing this information. It is a separate template
@@ -402,6 +419,9 @@ template UnderwritingDisclosure
           participant = requestee
           reportCid = self
           report
+
+instance Display UnderwritingDisclosure where
+  display a = "Underwriting report disclosed by " <> show a.agent <> " to " <> show a.participant
 
 -- | A request created by the agent inviting a single participant to make an offer on a 'LoanApplication'
 template FundingRequest
@@ -443,6 +463,9 @@ template FundingRequest
           instrument = report.instrument
           amount
           rate
+
+instance Display FundingRequest where
+  display a = "Funding request sent by " <> show a.agent <> " to " <> show a.participant
 
 -- | An offer by a participant to loan part (or all of) of the amount specified by the LoanApplication
 template FundingInterest

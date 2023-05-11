@@ -183,7 +183,7 @@ acceptLoanApplication agent application uuid = do
   result <- submit agent $ exerciseCmd application LoanApplicationSubmission_Accept
     with
       uuid
-  logLedger agent ("Application not found: " <> show result) result
+  logLedger agent result
   return result
 
 origination : LedgerParties -> PreOrigination -> Script Origination
@@ -222,18 +222,24 @@ origination LedgerParties{..} PreOrigination{..} = do
   log "-- Pre-Mandate Processing --"
   -- Agent kicks off the loan application process
   applicationProcess <- submit agent_charlie $ exerciseCmd acceptedApplication AcceptedLoanApplication_StartProcess
-  logLedger agent_charlie "Not found" applicationProcess
+  logLedger agent_charlie applicationProcess
   -- Agent coordinating the lending first asks an underwriter for a report
   underwritingRequest <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_CreateUnderwritingRequest with
     underwriter = underwriter_emma
-  logLedger agent_charlie "Not found" underwritingRequest
+  logLedger agent_charlie underwritingRequest
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
-  logLedger underwriter_emma "Not found" underwritingResult
+  logLedger underwriter_emma underwritingResult
+
+  log "-- Mandate Phase --"
+
   -- Agent goes back to the borrower with a mandate letter offer
   mandateLetterOffer <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_OfferMandateLetter with
     reportCid = underwritingResult
+  logLedger agent_charlie mandateLetterOffer
   acceptedMandateLetter <- submit borrower_alice $ exerciseCmd mandateLetterOffer MandateLetterOffer_Accept
+  logLedger agent_charlie acceptedMandateLetter
 
+  log "-- Lender solicitation --"
   -- Agent with underwriter's report and accepted mandate letter in hand reaches out to possible lenders
   let possibleLenders = [lender_gary, lender_hortense]
   forA_ possibleLenders $ \lender -> do
@@ -301,8 +307,11 @@ makeFundingRequest agent amount underwriteCid mandateLetterCid lender = do
     disclosedUnderwriting <- submit agent $ exerciseCmd underwriteCid UnderwritingResult_Disclose with
         disclose_to = lender
         mandateLetterCid
-    submit agent $ exerciseCmd disclosedUnderwriting MakeFundingRequest with
+    logLedger agent disclosedUnderwriting
+    fundingRequest <- submit agent $ exerciseCmd disclosedUnderwriting MakeFundingRequest with
         requestee = lender
+    logLedger agent fundingRequest
+    pure fundingRequest
 
 getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
 getFundingRequestsFor lender = query @FundingRequest lender

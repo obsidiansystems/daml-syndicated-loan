@@ -111,7 +111,6 @@ runBondStep LedgerParties{..} PreOrigination{..} orig OriginationSettlement{..} 
 
   logLedger
     borrower_alice
-    ("No batch found for: " <> show claimResult.batchCid)
     (fromInterfaceContractId @B.Batch claimResult.batchCid)
 
   submitMulti_ [borrower_alice, agent_charlie] [] do
