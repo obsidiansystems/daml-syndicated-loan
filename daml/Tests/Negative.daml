@@ -96,7 +96,13 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- and request funding based on the report.
     let prospectiveLenders = [ lender_gary, lender_hortense ]
     
+    -- To prevent the borrower and underwriter from knowing which lenders were approached with requests for funding, we use a token
+    -- proving that they have consented, without revealing the details of the application or the underwriting.
+    --
+    -- NOTE: The existence of the token is divulged to the underwriter, but nothing else.
     mandateLetterTokenCid <- testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_CreateToken
+    testVisibility ps [borrower_alice, agent_charlie] mandateLetterTokenCid
+
     fundingRequests <- forA prospectiveLenders $ \lender -> do
         disclosedUnderwritingReportCid <- testExercise ps agent_charlie aliceUnderwritingCid UnderwritingResult_Disclose with
             disclose_to = lender
@@ -143,6 +149,15 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- Even when Alice accepts the loan offer, it is not yet visible to other parties.
     aliceAcceptedLoanOfferCid <- testExercise ps borrower_alice aliceLoanOfferCid SyndicatedLoanOffer_Accept
     testVisibility ps [borrower_alice, agent_charlie] aliceAcceptedLoanOfferCid
+
+    -- With the assent of all parties with consideration, the agent can produce the signed loan agreement, pending settlement details
+    signedPendingLoanAgreement <- submit agent_charlie $ exerciseCmd aliceApplicationProcessCid LoanApplicationProcess_CreatePendingLoanAgreement with
+        borrower_commitment = aliceAcceptedLoanOfferCid
+        lender_commitments = fundingSelection_selected
+
+    -- Every party can see the loan agreement now, and the other parties.
+    testVisibility ps [borrower_alice, agent_charlie, lender_gary, lender_hortense] signedPendingLoanAgreement
+
     pure ()
 
 
