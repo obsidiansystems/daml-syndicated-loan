@@ -246,23 +246,18 @@ originationStep LedgerParties{..} PreOriginationStuff{..} = do
     pure (cid, fundingInterest)
   -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
   let FundingSelection{..} = selectFundingInterests loanApplicationSubmission fundingInterests
-  loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter uuid fundingSelection_ratePerAnnum
+  loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter fundingSelection_ratePerAnnum
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
-  pendingAgreementCid <- createPendingLoanAgreement agent_charlie acceptedLoan fundingSelection_selected
-  borrowerSigned <- submit agent_charlie $ do
-    exerciseCmd acceptedLoan $ AcceptedLoan_SignAgreement with
-      pendingAgreementCid
-  lendersSigned <- foldlA
-    (\agreementCid fundingInterestCid -> submit agent_charlie $ exerciseCmd fundingInterestCid FundingInterest_SignAgreement with agreementCid)
-    borrowerSigned
-    (Map.keys fundingSelection_selected)
+  signedPendingLoanAgreement <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_CreatePendingLoanAgreement with
+    borrower_commitment = acceptedLoan
+    lender_commitments = fundingSelection_selected
   -- Agent declines leftover funding interests
   forA_ fundingSelection_declined $ \declinedCid -> submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
   
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
-  origLoanAgreementCid <- submit agent_charlie $ exerciseCmd lendersSigned PendingLoanAgreement_Finalize
+  origLoanAgreementCid <- submit agent_charlie $ exerciseCmd signedPendingLoanAgreement PendingLoanAgreement_Finalize
     with
       now
       routeProviderCid
@@ -345,34 +340,11 @@ buildBook application accumulatedAmount accumulatedBook ((fundingCid, funding)::
             then (funding.rate, Map.insertWith (+) fundingCid remainingRequiredFunding accumulatedBook, map fst fundings)
             else buildBook application (accumulatedAmount + funding.amount) (Map.insertWith (+) fundingCid funding.amount accumulatedBook) fundings
 
-createPendingLoanAgreement
-  : Party
-  -> ContractId AcceptedLoan
-  -> Map (ContractId FundingInterest) Amount
-  -> Script (ContractId PendingLoanAgreement)
-createPendingLoanAgreement agent acceptanceCid lendersWithAmounts = do
-  Some acceptance <- queryContractId agent acceptanceCid
-  participantsWithAmounts <- fmap Map.fromList $ forA (Map.toList lendersWithAmounts) $ \(cid, amt) -> do
-    Some funding <- queryContractId agent cid
-    pure (funding.participant, amt)
-  let loanAgreement = LoanAgreement with
-        agent
-        participantsWithAmounts
-        borrower = acceptance.mandateLetter.borrower
-        uuid = acceptance.uuid
-        prospectus = acceptance.mandateLetter.mandateLetter.prospectus
-        loanTerms = acceptance.terms
-        
-  submit agent $ createCmd PendingLoanAgreement with
-    loanAgreement
-    signed = []
-
-createLoanProposal : ContractId AcceptedMandateLetter -> Text -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
-createLoanProposal applicationCid uuid rate = exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
-  uuid
+createLoanProposal : ContractId AcceptedMandateLetter -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
+createLoanProposal applicationCid rate = exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
   rate
 
-acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoan)
+acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoanOffer)
 acceptLoanProposal borrower offerCid = do
   submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
 
