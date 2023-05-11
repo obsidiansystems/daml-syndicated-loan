@@ -19,6 +19,7 @@ data LedgerParties = LedgerParties with
     underwriter_fred : Party
     lender_gary : Party
     lender_hortense : Party
+    lender_rue : Party
     fed : Party
   deriving (Show, Eq, Ord)
 
@@ -38,6 +39,7 @@ createParties = do
   underwriter_emma <- allocateParty "Underwriter_Emma"
   underwriter_fred <- allocateParty "Underwriter_Fred"
   lender_gary <- allocateParty "Lender_Gary"
+  lender_rue <- allocateParty "Lender_Rue"
   lender_hortense <- allocateParty "Lender_Hortense"
   fed <- allocateParty "Fed"
   let ledgerParties = LedgerParties { .. }
@@ -45,7 +47,7 @@ createParties = do
   pure ledgerParties
 
 allParties : LedgerParties -> Set Party
-allParties (LedgerParties borrower_alice borrower_bob agent_charlie agent_debbie underwriter_emma underwriter_fred lender_gary lender_hortense fed) = Set.fromList
+allParties (LedgerParties borrower_alice borrower_bob agent_charlie agent_debbie underwriter_emma underwriter_fred lender_gary lender_hortense lender_rue fed) = Set.fromList
   [ borrower_alice
   , borrower_bob
   , agent_charlie
@@ -54,5 +56,6 @@ allParties (LedgerParties borrower_alice borrower_bob agent_charlie agent_debbie
   , underwriter_fred
   , lender_gary
   , lender_hortense
+  , lender_rue
   , fed
   ]

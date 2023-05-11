@@ -12,6 +12,7 @@ module Workflow.Origination
   , FundingInterest_SignAgreement(..)
   , FundingRequest(..)
   , FundingRequest_Respond(..)
+  , FundingRequest_Reject(..)
   , LoanAgreement(..)
   , LoanApplicationSubmission(..)
   , LoanApplicationData(..)
@@ -542,7 +543,6 @@ template PendingLoanAgreement
     loanAgreement : LoanAgreement
     signed : [Party]
   where
-    -- TODO: ensure clause
     signatory loanAgreement.agent, signed
     observer (Map.keys loanAgreement.participantsWithAmounts), loanAgreement.borrower
     choice PendingLoanAgreement_Sign : ContractId PendingLoanAgreement
