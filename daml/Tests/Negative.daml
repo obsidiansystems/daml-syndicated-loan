@@ -33,7 +33,6 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
             amount = 12_345_678.00
             maxInterestRate = RatePerAnnum 0.05 -- 5% per annum
             prospectus = "To validate the syndicated loans framework :)"
-            durationYears = 10
             schedule
 
         aliceLoanApplication = LoanApplicationSubmission with

@@ -94,8 +94,6 @@ data LoanApplicationData = LoanApplicationData
     -- ^ The instrument in which the loan is denominated
     amount : Decimal
     -- ^ The amount requested
-    durationYears : Int
-    -- ^ The loan term requested
     maxInterestRate : RatePerAnnum
     -- ^ The maximum interest rate desired
     schedule : PeriodicSchedule
@@ -115,6 +113,8 @@ template LoanApplicationSubmission
   where
     signatory borrower
     observer agent
+    ensure applicationData.schedule.terminationDate > applicationData.schedule.effectiveDate
+           && applicationData.amount > 0.0
 
     choice LoanApplicationSubmission_Reject : ()
       controller agent
@@ -213,7 +213,7 @@ template LoanApplicationProcess
           mandateLetter = MandateLetter with
             instrument = report.report.instrument
             amount = report.report.amount
-            durationYears = report.report.durationYears
+            schedule = report.report.schedule
             prospectus = report.report.prospectus
     -- NOTE: Consuming— we assume that at this point the state of the application is "take it or leave it"
     choice LoanApplicationProcess_CreatePendingLoanAgreement : ContractId PendingLoanAgreement
@@ -287,7 +287,7 @@ template UnderwritingRequest
           report = UnderwritingReport with
             instrument = this.application.applicationData.instrument
             amount = this.application.applicationData.amount
-            durationYears = this.application.applicationData.durationYears
+            schedule = this.application.applicationData.schedule
             maxInterestRate = this.application.applicationData.maxInterestRate
             prospectus = this.application.applicationData.prospectus
           result
@@ -337,10 +337,9 @@ data UnderwritingReport = UnderwritingReport with
     instrument : InstrumentKey
     amount : Decimal -- Principal
     maxInterestRate : RatePerAnnum -- the maximum interest rate that the applicant is underwritten for
-    durationYears : Int
-    -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
+    schedule : PeriodicSchedule
     prospectus : Text
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Show)
 
 instance Display UnderwritingReport where
   display a = "Request: "
@@ -349,22 +348,21 @@ instance Display UnderwritingReport where
     <> display a.instrument
     <> " at "
     <> display a.maxInterestRate
-    <> " for "
-    <> show a.durationYears <> " years"
+    <> "\n"
+    <> "Repayment schedule: " <> display a.schedule
 
 -- | The information from the Underwriter's report on the application that will be shared with the applicant.
 data MandateLetter = MandateLetter
   with
     instrument : InstrumentKey
     amount : Decimal -- Principal. TODO: for now always equal to LoanApplication.amount
-    durationYears : Int
-    -- ^ Number of times the borrower pays interest, as well as the number of years after which the principal amount must be returned to the lenders.
+    schedule : PeriodicSchedule
     prospectus : Text
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Show)
 
 instance Display MandateLetter where
   display a = T.intercalate "\n"
-    [ "Terms: " <> display a.amount <> " of " <> display a.instrument <> " for " <> show a.durationYears <> "y"
+    [ "Terms: " <> display a.amount <> " of " <> display a.instrument <> "\n" <> "Repayment schedule: " <> display a.schedule
     , "Prospectus: " <> a.prospectus
     ]
 
@@ -426,8 +424,7 @@ template AcceptedMandateLetter
             instrument = mandateLetter.instrument
             amount = mandateLetter.amount
             rate
-            durationYears = mandateLetter.durationYears
-            schedule = application.applicationData.schedule
+            schedule = mandateLetter.schedule
     nonconsuming choice AcceptedMandateLetter_CreateToken : ContractId AcceptedMandateLetterToken
       controller agent
       do
@@ -628,8 +625,6 @@ data LoanTerms = LoanTerms with
     amount : Decimal -- Principal. TODO: for now always equal to LoanApplication.amount
     rate : RatePerAnnum
     -- ^ The interest amount paid by the borrower yearly is (amount * rate).
-    durationYears : Int
-    -- ^ The number of years after which the principal amount must be returned to the lenders.
     schedule : PeriodicSchedule
     -- ^ Repayment coupon schedule
       deriving (Eq, Show)
@@ -639,7 +634,6 @@ instance Display LoanTerms where
     "Terms: " <> display a.amount
     <> " of " <> display a.instrument
     <> " at " <> display a.rate
-    <> " for " <> show a.durationYears <> "y"
     <> "\n"
     <> "Repayment schedule: " <> display a.schedule
 
