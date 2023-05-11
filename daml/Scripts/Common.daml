@@ -1,3 +1,4 @@
+-- | Helpers for loan scripts
 module Scripts.Common where
 
 import Daml.Finance.Interface.Types.Common.Types

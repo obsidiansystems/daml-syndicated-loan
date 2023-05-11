@@ -1,0 +1,64 @@
+module Tests.RejectMandate where
+
+import DA.Date (date, toGregorian, toDateUTC)
+import Daml.Script
+
+import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
+import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
+
+import Util.Display
+import Workflow.Origination
+
+import Scripts.Origination.LoanApplication
+import Scripts.Origination.Underwriting
+
+import Scripts.Parties
+import Scripts.PreOrigination
+
+rejectMandate : Script ()
+rejectMandate = do
+    parties <- createParties
+    preOriginationResult <- preOrigination parties
+    originateWithMandateRejection parties preOriginationResult
+
+originateWithMandateRejection : LedgerParties -> PreOrigination -> Script ()
+originateWithMandateRejection LedgerParties{..} PreOrigination{..} = do
+  now <- getTime
+  let amount = 10_000_000.00
+      rate = RatePerAnnum 0.05 -- 5% per annum
+      uuid = "LoanInstrument"
+      startDate = toDateUTC now
+      (y,m,d) = toGregorian startDate
+      schedule = createPaymentPeriodicSchedule
+        (date (y+1) m d)
+        []
+        Following
+        Y 1
+        startDate
+        (date (y+10) m d)
+      loanApplicationSubmission = LoanApplicationSubmission with
+        borrower = borrower_alice
+        agent = agent_charlie
+        applicationData = LoanApplicationData with
+          instrument = usdInstrument
+          amount
+          maxInterestRate = rate
+          prospectus = "Loan for acquisition of competitor"
+          schedule
+  acceptedApplication <- preMandateApplication loanApplicationSubmission uuid
+  (applicationProcess, underwritingResult) <- preMandateProcessing acceptedApplication agent_charlie underwriter_emma
+  rejectMandatePhase agent_charlie borrower_alice applicationProcess underwritingResult
+
+rejectMandatePhase
+  : Party
+  -> Party
+  -> ContractId LoanApplicationProcess
+  -> ContractId UnderwritingResult
+  -> Script ()
+rejectMandatePhase agent borrower appProcess underwritingResult = do
+  log "-- Mandate Phase --"
+  -- Agent goes back to the borrower with a mandate letter offer
+  mandateLetterOffer <- submit agent $ exerciseCmd appProcess LoanApplicationProcess_OfferMandateLetter with
+    reportCid = underwritingResult
+  logLedger agent mandateLetterOffer
+  submit borrower $ exerciseCmd mandateLetterOffer MandateLetterOffer_Reject

@@ -29,6 +29,7 @@ instance Display LedgerParties where
 instance Display Party where
   display = show
 
+-- | Create our test parties
 createParties : Script LedgerParties
 createParties = do
   log "-- Creating Parties --"
@@ -46,6 +47,8 @@ createParties = do
   log ledgerParties
   pure ledgerParties
 
+-- | Access the 'LedgerParties' as a set. This is helpful for instances where you
+-- need to provide them as an argument (e.g., when testing rights of all parties)
 allParties : LedgerParties -> Set Party
 allParties (LedgerParties borrower_alice borrower_bob agent_charlie agent_debbie underwriter_emma underwriter_fred lender_gary lender_hortense lender_rue fed) = Set.fromList
   [ borrower_alice

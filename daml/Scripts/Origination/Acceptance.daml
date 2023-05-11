@@ -12,22 +12,30 @@ import Scripts.Origination.Offer
 import Util.Display
 import Workflow.Origination
 
+-- | Everything you need for multi-party loan acceptance.
+-- Accepting the multi-party loan agreement requires the combination
+-- of lender and borrower authorities delegated through various instruments
+data MultipartyAcceptance = MultipartyAcceptance with
+  agent : Party -- ^ Agent
+  applicationProcess : ContractId LoanApplicationProcess
+  acceptedLoan : ContractId AcceptedLoanOffer
+  fundingSelection : FundingSelection
+  routeProviderCid : ContractId RouteProvider.I
+  settlementFactoryCid : ContractId Settlement.F
+  fixedRateBondFactoryCid : ContractId FixedRate.F
+  now : Time
+
+-- | Create a multi-party loan agreement between the borrower, agent, and all
+-- accepted lenders
 multipartyAcceptance
-  : Party -- ^ Agent
-  -> ContractId LoanApplicationProcess
-  -> ContractId AcceptedLoanOffer
-  -> FundingSelection
-  -> ContractId RouteProvider.I
-  -> ContractId Settlement.F
-  -> ContractId FixedRate.F
-  -> Time
+  : MultipartyAcceptance
   -> Script (ContractId OriginatedLoanAgreement, OriginatedLoanAgreement)
-multipartyAcceptance agent appProcess acceptedLoan fundingSelection routeCid settleCid bondCid now = do
+multipartyAcceptance MultipartyAcceptance{..} = do
   log "-- Pending Loan Agreement --"
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.
   signedPendingLoanAgreement <- submit agent $
-    exerciseCmd appProcess LoanApplicationProcess_CreatePendingLoanAgreement with
+    exerciseCmd applicationProcess LoanApplicationProcess_CreatePendingLoanAgreement with
       borrower_commitment = acceptedLoan
       lender_commitments = fundingSelection.fundingSelection_selected
   logLedger agent signedPendingLoanAgreement
@@ -37,17 +45,21 @@ multipartyAcceptance agent appProcess acceptedLoan fundingSelection routeCid set
     declined <- queryContractId agent declinedCid
     case declined of
       None -> pure ()
-      Some dec -> log $ show dec.agent <> " declines offer from " <> show dec.participant
-        <> "\n" <> displayFundingInterestTerms dec
+      Some dec -> do
+        disclosed <- queryContractId agent dec.reportCid
+        case disclosed of
+          None -> pure ()
+          Some dis -> log $ show dec.agent <> " declines offer from " <> show dec.participant
+                            <> "\n" <> displayFundingInterestTerms dec dis
     submit agent $ exerciseCmd declinedCid FundingInterest_Decline
 
   -- Agent constructs the final, fully signed loan agreement— ready for settlement
   origLoanAgreementCid <- submit agent $ exerciseCmd signedPendingLoanAgreement PendingLoanAgreement_Finalize
     with
       now
-      routeProviderCid = routeCid
-      settlementFactoryCid = settleCid
-      fixedRateBondFactoryCid = bondCid
+      routeProviderCid
+      settlementFactoryCid
+      fixedRateBondFactoryCid
 
   Some origLoanAgreement <- queryContractId agent origLoanAgreementCid
   log origLoanAgreement

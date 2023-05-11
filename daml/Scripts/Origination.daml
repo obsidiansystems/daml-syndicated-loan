@@ -1,3 +1,5 @@
+-- | Originates a loan. At the end of this process, we have a signed loan
+-- agreement between all the parties
 module Scripts.Origination where
 
 import DA.Date (date, toGregorian, toDateUTC)
@@ -52,7 +54,6 @@ originate LedgerParties{..} PreOrigination{..} = do
           amount
           maxInterestRate = rate
           prospectus = "Loan for acquisition of competitor"
-          durationYears = 10
           schedule
 
   -- Loan application proposal and acceptance
@@ -65,29 +66,19 @@ originate LedgerParties{..} PreOrigination{..} = do
   acceptedMandateLetter <- mandatePhase agent_charlie borrower_alice applicationProcess underwritingResult
 
   -- Bid solicitation
-  let possibleLenders = [lender_gary, lender_hortense]
-  fundingInterests <- solicitBids
-    agent_charlie
-    possibleLenders
-    [lender_rue] -- Lenders who decline to participate
-    underwritingResult
-    acceptedMandateLetter
-    amount
-    rate
+  fundingInterests <- solicitBids $ SolicitBids with
+    agent = agent_charlie
+    decliningLenders = [lender_rue]
+    possibleLenders = [lender_gary, lender_hortense]
+    ..
 
   -- Book building and offer of syndicated loan to borrower
   (fundingSelection, acceptedLoan) <- makeOffer loanApplicationSubmission acceptedMandateLetter fundingInterests
 
   -- Origination signing ceremony
-  (origLoanAgreementCid, origLoanAgreement) <- multipartyAcceptance
-    agent_charlie
-    applicationProcess
-    acceptedLoan
-    fundingSelection
-    routeProviderCid
-    settlementFactoryCid
-    fixedRateBondFactoryCid
-    now
+  (origLoanAgreementCid, origLoanAgreement) <- multipartyAcceptance $ MultipartyAcceptance with
+      agent = agent_charlie
+      ..
 
   log $ "Loan originated at " <> show now
 

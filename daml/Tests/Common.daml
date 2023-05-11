@@ -1,6 +1,5 @@
 module Tests.Common where
 
-import DA.Action
 import Daml.Script
 
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
@@ -24,8 +23,7 @@ initialTest : LedgerParties -> Script ()
 initialTest parties = do
   preOriginationResult <- preOrigination parties
   originationResult : Origination <- originate parties preOriginationResult
-  _originationSettlement <- settleLoan parties preOriginationResult originationResult
-  pure ()
+  settleLoan parties preOriginationResult originationResult
 
 -- | Describe a test and indicate whether it has passed. Errors running the
 -- Script action will halt execution as usual. The trace will show what

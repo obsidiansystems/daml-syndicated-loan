@@ -1,12 +1,43 @@
 module Tests.DamlHub where
 
+import Tests.Common(test)
 import Daml.Script
 
+import Util.Display
+import Scripts.Origination
+import Scripts.Origination.Settlement
+import Scripts.PreOrigination
 import Scripts.Parties
-import Tests.Common
+import Scripts.Settlement
 
-initialTestHub : LedgerParties -> Script ()
-initialTestHub parties = initialTest parties
+
+runPreOrigination : LedgerParties -> Script (LedgerParties, PreOrigination)
+runPreOrigination parties = do
+  preOrig <- preOrigination parties
+  pure (parties, preOrig)
+
+runOrigination : LedgerParties -> Script (LedgerParties, PreOrigination, Origination)
+runOrigination parties' = do
+  (parties, preOrig) <- runPreOrigination parties'
+  orig <- originate parties preOrig
+  pure (parties, preOrig, orig)
+
+
+runServicing : LedgerParties -> Script ()
+runServicing parties = do
+  (p, po, o) <- runOrigination parties
+  settleLoan p po o
+  let agent = o.origLoanAgreement.loanAgreement.agent
+      maxSteps = 50
+  runBondSteps p po agent o.originationTime o.origLoanAgreementCid 1 maxSteps >>= \case
+    None -> log "-- Repayment Complete --"
+    Some _ -> pure ()
+
+
+allTestHub : LedgerParties -> Script ()
+allTestHub parties = do
+  test "Run Servicing" $ runServicing parties
+  pure ()
 
 {-
     Make a Daml Script that runs every availble test against the live ledger

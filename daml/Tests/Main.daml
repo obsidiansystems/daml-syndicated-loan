@@ -9,24 +9,37 @@ import Scripts.Origination.Settlement
 import Scripts.Parties
 import Scripts.PreOrigination
 import Scripts.Settlement
+import qualified Tests.FailedUnderwriting
 
+import Tests.IDE (negativeTestIDE)
 import Util.Display
 
+-- | Creates parties
 runCreateParties : Script LedgerParties
 runCreateParties = createParties
 
+-- | Pre-origination setup, including:
+--     * party creation
+--     * account provisioning
+--     * initial account funding
 runPreOrigination : Script (LedgerParties, PreOrigination)
 runPreOrigination = do
   parties <- runCreateParties
   preOrig <- preOrigination parties
   pure (parties, preOrig)
 
+-- | Origination: during this phase the agent:
+--     * receives a loan application
+--     * performs underwriting
+--     * offers loan terms to the borrower
+--     * solicits bids from lenders
 runOrigination : Script (LedgerParties, PreOrigination, Origination)
 runOrigination = do
   (parties, preOrig) <- runPreOrigination
   orig <- originate parties preOrig
   pure (parties, preOrig, orig)
 
+-- | Loan repayment
 runServicing : Script ()
 runServicing = do
   setTime (time (date 2023 Apr 12) 4 4 4)
@@ -37,3 +50,13 @@ runServicing = do
   runBondSteps p po agent o.originationTime o.origLoanAgreementCid 1 maxSteps >>= \case
     None -> log "-- Repayment Complete --"
     Some _ -> pure ()
+
+-- | Negative underwriting result
+failedUnderwriting : Script ()
+failedUnderwriting = Tests.FailedUnderwriting.failedUnderwriting
+
+-- | Negative tests, including tests of privacy invariants and exercise rights
+runNegativeTests : Script ()
+runNegativeTests = negativeTestIDE
+
+-- Note: Some divulgence warnings appear at the end of this file.  These are caused by tests that check whether incorrect divulgence has occurred.
