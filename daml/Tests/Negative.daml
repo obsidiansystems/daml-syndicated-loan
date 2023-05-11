@@ -207,7 +207,10 @@ testVisibility label ps shouldSee cid = do
             forA_ shouldNotSee $ \party -> do
                 None <- queryContractId party cid
                 pure ()
-    test ("Only " <> show shouldSee <> " should see " <> label <> " and " <> show shouldNotSee <> " should not") go
+    test
+      (label <> " should ONLY be visible to " <> show shouldSee
+      <> "\n    and NOT visible to " <> show shouldNotSee)
+      go
 
 -- | Given a contract, a choice, and a party who should be able to exercise that choice on that contract,
 -- confirms that no other user can exercise that choice and that user can.
@@ -225,4 +228,7 @@ testExercise ps shouldExercise cid contract_choice = do
             forA_ shouldNotExercise $ \party -> do
                 submitMustFail party $ exerciseCmd cid contract_choice
             submit shouldExercise $ exerciseCmd cid contract_choice
-    test ("Only " <> show shouldExercise <> " should be able to exercise " <> label <> " and " <> show shouldNotExercise <> " should not") go
+    test
+      ("Exercise of " <> label <> " should ONLY be possible for " <> show shouldExercise
+      <> "\n    and NOT possible for " <> show shouldNotExercise)
+      go
