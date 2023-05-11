@@ -791,3 +791,9 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
         terminationDate = maturityDate
     -- CREATE_PERIODIC_SCHEDULE_END
     periodicSchedule
+
+instance Display PendingLoanAgreement where
+  display PendingLoanAgreement{..} = show loanAgreement.agent <> " has collected signatures from " <> T.intercalate ", " (fmap show signed) <> " for the final agreement"
+
+instance Display OriginatedLoanAgreement where
+  display OriginatedLoanAgreement{..} = show loanAgreement.agent <> " has finished collecting all signatures for the final agreement, and is now processing settlement of the agreement"
