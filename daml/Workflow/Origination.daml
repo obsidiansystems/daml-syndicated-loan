@@ -10,6 +10,7 @@ module Workflow.Origination
   , AcceptedMandateLetterToken_Burn(..)
   , CreateUnderwritingResult(..)
   , FundingInterest(..)
+  , displayFundingInterestTerms
   , FundingInterest_Decline(..)
   , FundingInterest_SignAgreement(..)
   , FundingRequest(..)
@@ -575,8 +576,12 @@ template FundingInterest
 instance Display FundingInterest where
   display a = T.intercalate "\n"
     [ show a.participant <> " sends offer to " <> show a.agent
-    , "Terms: " <> display a.amount <> " of " <> display a.report.instrument <> " at " <> display a.rate
+    , displayFundingInterestTerms a
     ]
+
+displayFundingInterestTerms : FundingInterest -> Text
+displayFundingInterestTerms a =
+    "Terms: " <> display a.amount <> " of " <> display a.report.instrument <> " at " <> display a.rate
 
 template SyndicatedLoanOffer
   with
@@ -812,3 +817,9 @@ createPaymentPeriodicSchedule firstCouponDate holidayCalendarIds businessDayConv
         terminationDate = maturityDate
     -- CREATE_PERIODIC_SCHEDULE_END
     periodicSchedule
+
+instance Display PendingLoanAgreement where
+  display PendingLoanAgreement{..} = show loanAgreement.agent <> " has collected signatures from " <> T.intercalate ", " (fmap show signed) <> " for the final agreement"
+
+instance Display OriginatedLoanAgreement where
+  display OriginatedLoanAgreement{..} = show loanAgreement.agent <> " has finished collecting all signatures for the final agreement, and is now processing settlement of the agreement"
