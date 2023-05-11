@@ -14,6 +14,7 @@
   * Underwriting result
   * Negative loan amounts
   * Mandate letter rejection
+  * Insufficient funds to make payment
 * Fix DAML Hub deployment
 ## 0.1.0.0 - 2023-05-11
 
