@@ -1,5 +1,13 @@
 # Syndicated Lending in DAML
 
+* [Project Description](#project-description)
+  * [Phases](#phases)
+  * [Parties](#parties)
+  * [Workflows](#workflows)
+  * [Future Directions](#future-directions)
+  * [References](#references)
+* [Building the Project](#building-the-project)
+
 ## Project Description
 This is application has been built by [Obsidian Systems](https://obsidian.systems) as an example of how [DAML](https://www.daml.com/) can be used to model syndicated lending.
 
