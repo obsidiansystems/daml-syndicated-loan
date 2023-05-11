@@ -9,11 +9,11 @@ import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Fol
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
 
 import Scripts.Parties
-import Tests.Common(PreOriginationStuff(..), FundingSelection(..), selectFundingInterests)
+import Tests.Common(PreOrigination(..), FundingSelection(..), selectFundingInterests)
 import Workflow.Origination
 
-originationTests : LedgerParties -> PreOriginationStuff -> Script ()
-originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
+originationTests : LedgerParties -> PreOrigination -> Script (ContractId OriginatedLoanAgreement)
+originationTests ps@LedgerParties{..} PreOrigination{..} = do
     now <- getTime
     let startDate = toDateUTC now
         (y,m,d) = toGregorian startDate
@@ -96,11 +96,17 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- and request funding based on the report.
     let prospectiveLenders = [ lender_gary, lender_hortense ]
     
-    mandateLetterTokenCid <- testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_CreateToken
+    -- To prevent the borrower and underwriter from knowing which lenders were approached with requests for funding, we use a token
+    -- proving that they have consented, without revealing the details of the application or the underwriting.
+    --
+    -- NOTE: The existence of the token is divulged to the underwriter, but nothing else.
+    aliceMandateLetterTokenCid <- testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_CreateToken
+    testVisibility ps [borrower_alice, agent_charlie] aliceMandateLetterTokenCid
+
     fundingRequests <- forA prospectiveLenders $ \lender -> do
         disclosedUnderwritingReportCid <- testExercise ps agent_charlie aliceUnderwritingCid UnderwritingResult_Disclose with
             disclose_to = lender
-            mandateLetterTokenCid = mandateLetterTokenCid
+            mandateLetterTokenCid = aliceMandateLetterTokenCid
         -- only charlie and this specific lender can see this disclosure
         testVisibility ps [lender, agent_charlie] disclosedUnderwritingReportCid
 
@@ -143,7 +149,27 @@ originationTests ps@LedgerParties{..} PreOriginationStuff{..} = do
     -- Even when Alice accepts the loan offer, it is not yet visible to other parties.
     aliceAcceptedLoanOfferCid <- testExercise ps borrower_alice aliceLoanOfferCid SyndicatedLoanOffer_Accept
     testVisibility ps [borrower_alice, agent_charlie] aliceAcceptedLoanOfferCid
-    pure ()
+
+    -- With the assent of all parties with consideration, the agent can produce the signed loan agreement, pending settlement details
+    signedPendingLoanAgreementCid <- testExercise ps agent_charlie aliceApplicationProcessCid LoanApplicationProcess_CreatePendingLoanAgreement with
+        borrower_commitment = aliceAcceptedLoanOfferCid
+        lender_commitments = fundingSelection_selected
+    testVisibility ps [borrower_alice, agent_charlie, lender_gary, lender_hortense] signedPendingLoanAgreementCid
+
+    -- Finalize the loan with settlement details! Only the agent can finalize the agreement.
+    -- NOTE: This produces a divulgence warning because the borrower can see the application process— and nothing more.
+    originatedLoanCid <- testExercise ps agent_charlie signedPendingLoanAgreementCid PendingLoanAgreement_Finalize with
+      now
+      routeProviderCid
+      settlementFactoryCid
+      fixedRateBondFactoryCid
+    testVisibility ps [borrower_alice, agent_charlie, lender_gary, lender_hortense] originatedLoanCid
+
+    -- Ideally these would be cleaned up upon origination, but this data is otherwise not necessary to include there
+    testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_Burn
+    -- NOTE: This produces a divulgence warning because the underwriter can see the token— and nothing more.
+    testExercise ps agent_charlie aliceMandateLetterTokenCid AcceptedMandateLetterToken_Burn
+    pure originatedLoanCid
 
 
 -- Explicitly deconstruct the ledger parties so that if it changes, we notice to include them
