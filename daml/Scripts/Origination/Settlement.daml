@@ -24,6 +24,7 @@ import Workflow.SettlementProposal
 import Scripts.Parties
 import Scripts.PreOrigination
 import Scripts.Origination
+import qualified Daml.Finance.Settlement.Batch as B
 
 data OriginationSettlement = OriginationSettlement with
   borrowerAliceUsdHolding : NonEmpty (ContractId Fungible.Fungible)
@@ -32,6 +33,7 @@ data OriginationSettlement = OriginationSettlement with
 
 settleLoan : LedgerParties -> PreOrigination -> Origination -> Script ()
 settleLoan LedgerParties {..} PreOrigination{..} origination = do
+  log "-- Post-Origination Settlement --"
   -- Generate Settlement Proposal
   settlementProposalCid <- submit agent_charlie do
     createCmd SettlementProposal with
@@ -141,6 +143,8 @@ settleLoan LedgerParties {..} PreOrigination{..} origination = do
       exerciseCmd allocInstructionsCid Instruction.Approve with
         actors = Set.singleton approvingParty
         approval = TakeDelivery approvingPartyAccount
+
+  logLedger agent_charlie $ fromInterfaceContractId @B.Batch batchCid
 
   _ <- submit agent_charlie do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid

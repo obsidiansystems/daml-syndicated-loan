@@ -40,7 +40,7 @@ template SettlementProposal
         assertMsg "Already settled" $ not settled
         assertMsg ("Missing signatures. Expected: " <> show allParties <> ", found: " <> show sigAccumulator) $
           sort sigAccumulator == sort allParties
-        let id = "settlement-" <> (show settlementFactoryCid) <> "-" <> (show routeProviderCid)
+        let id = this.loan.loanAgreement.uuid
         newCid <- create this with settled = True
         res <- settleTransactions loan.loanAgreement allParties id routeProviderCid settlementFactoryCid bond
         pure (newCid, res)
