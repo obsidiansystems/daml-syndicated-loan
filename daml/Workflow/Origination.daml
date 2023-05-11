@@ -469,7 +469,7 @@ template UnderwritingDisclosure
     report : UnderwritingReport
     participant : Party
   where
-    signatory agent
+    signatory agent, underwriter
     observer participant
 
     nonconsuming choice MakeFundingRequest : ContractId FundingRequest
