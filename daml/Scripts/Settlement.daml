@@ -7,8 +7,6 @@ import DA.Set qualified as Set
 import DA.Time (time)
 
 import Daml.Finance.Interface.Holding.Base qualified as Holding (I, Base)
-import Daml.Finance.Interface.Holding.Fungible (SplitResult(..))
-import Daml.Finance.Interface.Holding.Fungible qualified as Fungible
 import Daml.Finance.Interface.Lifecycle.Effect (Effect)
 import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (ClaimEffect(..))
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
@@ -21,6 +19,7 @@ import Daml.Finance.Settlement.Batch qualified as B
 
 import Scripts.Parties
 import Tests.Common
+import Tests.Util qualified as Util
 import Util.Display
 import Util.Script
 import Workflow.Origination
@@ -83,27 +82,28 @@ runBondStep LedgerParties{..} PreOriginationStuff{..} orig OriginationSettlement
 
   let [effectCid] = lifecycleData.effects
 
-  (aliceCashHoldingCid', _resultCids) <- processLenderClaim $ LenderClaimConfig with
+
+  processLenderClaim $ LenderClaimConfig with
     agent
     orig
     effectCid
     borrower = borrower_alice
-    borrowerCashHoldingCid = aliceCashHoldingCid
     lender = lender_gary
     lenderLoanHoldingCid = lenderGaryBondHolding
     lenderLoanAccount = ledgerAccounts.garyLoanAccount
     lenderCashAccount = ledgerAccounts.garyAccount
+    borrowerCashAccount = ledgerAccounts.aliceAccount
 
   _resultCids <- processLenderClaim $ LenderClaimConfig with
     agent
     orig
     effectCid
     borrower = borrower_alice
-    borrowerCashHoldingCid = aliceCashHoldingCid'
     lender = lender_hortense
     lenderLoanHoldingCid = lenderHortenseBondHolding
     lenderLoanAccount = ledgerAccounts.hortenseLoanAccount
     lenderCashAccount = ledgerAccounts.hortenseAccount
+    borrowerCashAccount = ledgerAccounts.aliceAccount
 
   return ()
 
@@ -115,13 +115,13 @@ data LenderClaimConfig = LenderClaimConfig with
   lenderLoanAccount : AccountKey
   lenderCashAccount : AccountKey
   borrower : Party
-  borrowerCashHoldingCid : ContractId Holding.Base
+  borrowerCashAccount : AccountKey
   agent : Party
 
-processLenderClaim : LenderClaimConfig -> Script (ContractId Holding.Base, [ContractId Holding.Base])
+processLenderClaim : LenderClaimConfig -> Script ()
 processLenderClaim LenderClaimConfig{..} = do
   let lenderLoanHoldingBase = toInterfaceContractId @Holding.Base lenderLoanHoldingCid
-  
+
   claimResult <- submit lender $
     exerciseCmd orig.origLoanAgreement.claimRule Claim.ClaimEffect with
       claimer = lender
@@ -147,9 +147,7 @@ processLenderClaim LenderClaimConfig{..} = do
     approval = TakeDelivery lenderLoanAccount
 
   Some couponProducedInstr <- queryContractId borrower (fromInterfaceContractId @Settlement.Instruction couponProduced)
-  SplitResult{splitCids = [borrowerCashUsed], rest = Some borrowerCashRemaining} <- submit borrower do
-    exerciseCmd (coerceInterfaceContractId @Fungible.Fungible borrowerCashHoldingCid) Fungible.Split with
-      amounts = [couponProducedInstr.routedStep.quantity.amount]
+  Some borrowerCashUsed <- Util.getHoldingOfAmount borrowerCashAccount couponProducedInstr.routedStep.quantity.unit couponProducedInstr.routedStep.quantity.amount
 
   (couponProduced2, _) <- submit borrower $ exerciseCmd couponProduced Instruction.Allocate with
     actors = Set.fromList [borrower]
@@ -163,8 +161,8 @@ processLenderClaim LenderClaimConfig{..} = do
     ("No batch found for: " <> show claimResult.batchCid)
     (fromInterfaceContractId @B.Batch claimResult.batchCid)
 
-  batchResults <- submit agent $ do
+  submit_ agent $ do
     exerciseCmd claimResult.batchCid Batch.Settle with
       actors = Set.fromList [agent]
 
-  return (toInterfaceContractId borrowerCashRemaining, batchResults)
+  return ()
