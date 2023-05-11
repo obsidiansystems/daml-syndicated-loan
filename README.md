@@ -27,6 +27,14 @@ This application models loan origination and servicing.
 
 ![Lending and Servicing Workflow](./flowchart.png)
 
+### Future Directions
+
+This example can be extended in a number of ways, including:
+
+* Adding agent fees
+* Modeling covenants and loan modifications/acceleration on covenant breach
+* Modeling interest rate modifications (either due to variable rate or as a consequence of contractual terms)
+
 ### References
 
 - [Syndicated Lending: Practice and Documentation](https://financialmarketstoolkit.cliffordchance.com/en/financial-markets-resources/resources-by-type/guides/syndicated-lending-7th-edition--december-2019-.html)
