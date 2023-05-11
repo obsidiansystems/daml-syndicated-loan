@@ -1,10 +1,7 @@
 module Tests.DamlHub where
 
+import Tests.Common(test)
 import Daml.Script
-
-
-import DA.Date (Month(..), date)
-import DA.Time (time)
 
 import Util.Display
 import Scripts.Origination
@@ -39,7 +36,7 @@ runServicing parties = do
 
 allTestHub : LedgerParties -> Script ()
 allTestHub parties = do
-  runServicing parties
+  test "Run Servicing" $ runServicing parties
   pure ()
 
 {-
