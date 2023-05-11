@@ -16,6 +16,6 @@ in
       mkdir $out
       ${damlSdk.sdk}/bin/daml test
       ${damlSdk.sdk}/bin/daml build -o $out/package.dar
-      find $src/daml/Workflow -name "*.daml" -type f -print0 | xargs -0 grep -o "import Daml.Finance.*" | grep -Ev "${excludeWorkflowModules}"
+      $src/check_modules.sh $src/daml/Workflow
     '';
 }

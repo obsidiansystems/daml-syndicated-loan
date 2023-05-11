@@ -1,0 +1,71 @@
+module Tests.Util
+  ( getAccountHoldings
+  , getHoldingOfAmount
+  )
+  where
+
+import Daml.Finance.Interface.Types.Common.Types (InstrumentKey, AccountKey)
+import Daml.Script
+import qualified Daml.Finance.Holding.Fungible as Holding
+import qualified Daml.Finance.Interface.Holding.Fungible as IHolding
+import DA.List.Total (head)
+import Daml.Finance.Interface.Holding.Fungible (SplitResult(SplitResult))
+
+getAccountHoldings
+  :  AccountKey
+  -> InstrumentKey
+  -> Script [(ContractId Holding.Fungible, Holding.Fungible)]
+getAccountHoldings k currency =
+  queryFilter
+    k.owner
+    (\holding -> holding.account == k && holding.instrument == currency)
+
+-- | Given an AccountKey and a quantity, produce a holding of the specified quantity
+getHoldingOfAmount
+  :  AccountKey
+  -> InstrumentKey
+  -- ^ Target currency
+  -> Decimal
+  -- ^ Target quantity
+  -> Script (Optional (ContractId Holding.Fungible))
+  -- ^ None: insufficient funds, Some: a holding of the specified quantity
+getHoldingOfAmount k currency qty = do
+  getAccountHoldings k currency >>= letsGo
+  where
+    letsGo holdings
+      | sum (map ((.amount) . snd) holdings) < qty = pure None -- Insufficient funds
+      | Some exactMatch <- getExactMatch holdings = pure $ Some (fst exactMatch) -- We have an exact match (lucky!)
+      | otherwise = do
+        case holdings of
+          [] -> pure None -- already handlded by the sum check above
+          [justOne] -> Some <$> doSplit (fst justOne)
+          (holding1 :: otherHoldings) -> do
+            mergedHolding <- merge (fst holding1) (fst <$> otherHoldings)
+            Some <$> doSplit mergedHolding
+
+    doSplit holdingCid = do
+      [res] <- split holdingCid [qty]
+      pure res
+
+    getExactMatch holdings =
+      head $ filter ((== qty) . (.amount) . snd) holdings
+
+    merge
+      :  ContractId Holding.Fungible
+      -> [ContractId Holding.Fungible]
+      -> Script (ContractId Holding.Fungible)
+    merge holdingCid holdingCids = do
+      let iFungible = toInterfaceContractId @IHolding.Fungible holdingCid
+      res <- submit k.owner $ exerciseCmd iFungible IHolding.Merge with
+        fungibleCids = toInterfaceContractId @IHolding.Fungible <$> holdingCids
+      pure $ fromInterfaceContractId res
+
+    split
+      :  ContractId Holding.Fungible
+      -> [Numeric 10]
+      -> Script [ContractId Holding.Fungible]
+    split holdingCid amounts = do
+      SplitResult{splitCids} <- submit k.owner do
+        exerciseCmd (toInterfaceContractId @IHolding.Fungible holdingCid) IHolding.Split with
+          amounts = amounts
+      pure (fromInterfaceContractId @Holding.Fungible <$> splitCids)
