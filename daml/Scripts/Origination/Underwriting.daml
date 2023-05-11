@@ -1,3 +1,4 @@
+-- | Request and receive underwriting report
 module Scripts.Origination.Underwriting where
 
 import Daml.Script
