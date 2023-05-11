@@ -50,7 +50,7 @@ This example can be extended in a number of ways, including:
 
 ## Building the Project
 
-If you're a nix user, you can use `nix-shell` to enter a shell with all the required dependencies. Otherwise, install the daml sdk by following the directions [here](https://docs.daml.com/getting-started/installation.html).
+If you're a [Nix](nixos.org/) user, you can use `nix-shell` to enter a shell with all the required dependencies. Otherwise, install the daml sdk by following the directions [here](https://docs.daml.com/getting-started/installation.html).
 
 Once you have the sdk, you can run:
 
