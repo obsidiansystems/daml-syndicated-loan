@@ -1,7 +1,6 @@
 module Scripts.Origination where
 
 import DA.Date (date, toGregorian, toDateUTC)
-import DA.Foldable
 import Daml.Script
 
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
@@ -10,6 +9,7 @@ import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
 import Util.Display
 import Workflow.Origination
 
+import Scripts.Origination.Acceptance
 import Scripts.Origination.LoanApplication
 import Scripts.Origination.Mandate
 import Scripts.Origination.Offer
@@ -78,36 +78,19 @@ originate LedgerParties{..} PreOrigination{..} = do
   -- Book building and offer of syndicated loan to borrower
   (fundingSelection, acceptedLoan) <- makeOffer loanApplicationSubmission acceptedMandateLetter fundingInterests
 
-  log "-- Pending Loan Agreement --"
-  -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
-  -- and gathers the signatures that have been authorized.
-  signedPendingLoanAgreement <- submit agent_charlie $
-    exerciseCmd applicationProcess LoanApplicationProcess_CreatePendingLoanAgreement with
-      borrower_commitment = acceptedLoan
-      lender_commitments = fundingSelection.fundingSelection_selected
-  logLedger agent_charlie signedPendingLoanAgreement
-
-  -- Agent declines leftover funding interests
-  forA_ fundingSelection.fundingSelection_declined $ \declinedCid -> do
-    declined <- queryContractId agent_charlie declinedCid
-    case declined of
-      None -> pure ()
-      Some dec -> log $ show dec.agent <> " declines offer from " <> show dec.participant
-        <> "\n" <> displayFundingInterestTerms dec
-    submit agent_charlie $ exerciseCmd declinedCid FundingInterest_Decline
-
-  -- Agent constructs the final, fully signed loan agreement— ready for settlement
-  origLoanAgreementCid <- submit agent_charlie $ exerciseCmd signedPendingLoanAgreement PendingLoanAgreement_Finalize
-    with
-      now
-      routeProviderCid
-      settlementFactoryCid
-      fixedRateBondFactoryCid
-
-  Some origLoanAgreement <- queryContractId agent_charlie origLoanAgreementCid
-  log origLoanAgreement
+  -- Origination signing ceremony
+  (origLoanAgreementCid, origLoanAgreement) <- multipartyAcceptance
+    agent_charlie
+    applicationProcess
+    acceptedLoan
+    fundingSelection
+    routeProviderCid
+    settlementFactoryCid
+    fixedRateBondFactoryCid
+    now
 
   log $ "Loan originated at " <> show now
+
   pure Origination with
     origLoanAgreement
     origLoanAgreementCid
