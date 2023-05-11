@@ -27,6 +27,7 @@ module Workflow.Origination
   , LoanApplicationSubmission_Accept(..)
   , MakeFundingRequest(..)
   , MandateLetterOffer_Accept(..)
+  , MandateLetterOffer_Reject(..)
   , OriginatedLoanAgreement(..)
   , OriginatedLoanAgreement_Lifecycle(..)
   , OriginatedLoanAgreement_LifecycleData(..)
