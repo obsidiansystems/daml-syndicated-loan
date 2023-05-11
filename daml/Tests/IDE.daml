@@ -22,4 +22,5 @@ negativeTestIDE : Script ()
 negativeTestIDE = do
   parties <- createParties
   preorigination <- preOrigination parties
-  originationTests parties preorigination
+  _ <- originationTests parties preorigination
+  pure ()
