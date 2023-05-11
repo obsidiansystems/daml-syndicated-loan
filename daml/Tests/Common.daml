@@ -127,7 +127,7 @@ preOrigination parties@(LedgerParties{..}) = do
 
     -- Rue's USD account
     (_rueAccount, Some _rueCashHoldingCid) <- mkCashAccount lender_rue 70_000_000.00
-    -- Gary's loan account
+    -- Rue's loan account
     _rueLoanAccount <- makeLoanAccount lender_rue borrower_alice
 
     -- ...for Alice's Company
