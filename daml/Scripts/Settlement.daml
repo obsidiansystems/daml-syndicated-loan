@@ -12,8 +12,8 @@ import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction
 import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
 import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
-import Daml.Finance.Settlement.Instruction qualified as Settlement
 import Daml.Finance.Settlement.Batch qualified as B
+import Daml.Finance.Settlement.Instruction qualified as Settlement
 
 import Scripts.Origination
 import Scripts.Parties
@@ -36,14 +36,9 @@ data SettlementState = SettlementState
     bondInstrument : InstrumentKey
   deriving (Eq, Show)
 
--- | Test script that
--- 1. executes the `runTransfer` script
--- 2. creates a token instrument
--- 3. credits a token holding to Alice in her bank account
--- 4. atomically exchanges the token against the cash holding
-
 runBondStep : LedgerParties -> PreOrigination -> Origination -> Script ()
 runBondStep LedgerParties{..} PreOrigination{..} orig = do
+  log "-- Servicing: Running Repayment Step --"
   let agent = orig.origLoanAgreement.loanAgreement.agent
       now = orig.originationTime
   let (y',m',d') = toGregorian (toDateUTC now)

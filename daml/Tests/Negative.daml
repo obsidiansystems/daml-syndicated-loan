@@ -3,6 +3,7 @@ module Tests.Negative where
 import DA.Date
 import DA.Foldable
 import DA.Set qualified as Set
+import DA.Text qualified as T
 
 import Daml.Script
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
@@ -12,6 +13,8 @@ import Scripts.Origination.Offer
 import Scripts.Parties
 import Scripts.PreOrigination
 import Workflow.Origination
+import Tests.Common
+import Util.Display
 
 originationTests : LedgerParties -> PreOrigination -> Script (ContractId OriginatedLoanAgreement)
 originationTests ps@LedgerParties{..} PreOrigination{..} = do
@@ -38,14 +41,16 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
             agent = agent_charlie
             applicationData = aliceApplicationData
 
+    log "-- Negative Tests --"
     -- Workflow for Alice to submit a loan
-    -- Bob cannot submit an application for Alice
-    submitMustFail borrower_bob $ createCmd aliceLoanApplication
+    test "Bob cannot submit an application for Alice" $
+      submitMustFail borrower_bob $ createCmd aliceLoanApplication
 
     -- Alice submits her application
+
     aliceSubmittedApplicationCid <- submit borrower_alice $ createCmd aliceLoanApplication
     -- Only alice and her agent charlie should be able to see the application
-    testVisibility ps [ borrower_alice, agent_charlie ] aliceSubmittedApplicationCid
+    testVisibility "LoanApplicationSubmission" ps [ borrower_alice, agent_charlie ] aliceSubmittedApplicationCid
 
     -- Charlie accepts the application, they are the only one who is able to do so
     -- They use a uuid to keep track of alice's application through the workflow
@@ -54,12 +59,12 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
         uuid = aliceApplicationUuid
 
     -- It is the case that only alice and charlie can see the accepted application
-    testVisibility ps [ borrower_alice, agent_charlie ] aliceApplicationCid
+    testVisibility "Alice's AcceptedApplication" ps [ borrower_alice, agent_charlie ] aliceApplicationCid
 
     -- To maintain the privacy of the underwriters and the lenders, Charlie kicks off a workflow not involving the borrower as a signatory
     -- Later on, we will ensure that the loan agreement corresponds with the application Alice submitted.
     aliceApplicationProcessCid <- testExercise ps agent_charlie aliceApplicationCid AcceptedLoanApplication_StartProcess
-    testVisibility ps [ agent_charlie ] aliceApplicationProcessCid
+    testVisibility "LoanApplicationProcess" ps [ agent_charlie ] aliceApplicationProcessCid
 
     -- Charlie submits alice's application to an underwriter— NO ONE else has
     -- the authority to do so.
@@ -70,16 +75,16 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
     aliceUnderwritingRequestCid <- testExercise ps agent_charlie aliceApplicationProcessCid LoanApplicationProcess_CreateUnderwritingRequest with
         underwriter = underwriter_emma
     -- The underwriter does not see the original application
-    testVisibility ps [ borrower_alice, agent_charlie ] aliceApplicationCid
+    testVisibility "Alice's AcceptedLoanApplication" ps [ borrower_alice, agent_charlie ] aliceApplicationCid
     -- Nor does alice see the underwriting request
-    testVisibility ps [ agent_charlie, underwriter_emma ] aliceUnderwritingRequestCid
+    testVisibility "UnderwritingRequest" ps [ agent_charlie, underwriter_emma ] aliceUnderwritingRequestCid
 
     -- The underwriter produces a result, in this case, they approve Alice's loan
     -- Note that they are the only one with the authority to exercise this choice.
     aliceUnderwritingCid <- testExercise ps underwriter_emma aliceUnderwritingRequestCid CreateUnderwritingResult with
       result = True
     -- The report is only visible to the underwriter and the agent who requested it
-    testVisibility ps [ agent_charlie, underwriter_emma ] aliceUnderwritingCid
+    testVisibility "UnderwritingResult" ps [ agent_charlie, underwriter_emma ] aliceUnderwritingCid
 
     -- With the report in hand, Charlie is prepared to make an offer to Alice.
     --
@@ -87,11 +92,11 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
     -- not anything underlying the underwriting process.
     aliceMandateLetterOfferCid <- testExercise ps agent_charlie aliceApplicationProcessCid LoanApplicationProcess_OfferMandateLetter with
         reportCid = aliceUnderwritingCid
-    testVisibility ps [ borrower_alice, agent_charlie ] aliceMandateLetterOfferCid
+    testVisibility "MandateLetterOffer" ps [ borrower_alice, agent_charlie ] aliceMandateLetterOfferCid
 
     -- Alice accepts the offer
     aliceMandateLetterCid <- testExercise ps borrower_alice aliceMandateLetterOfferCid MandateLetterOffer_Accept
-    testVisibility ps [ borrower_alice, agent_charlie ] aliceMandateLetterCid
+    testVisibility "AcceptedMandateLetter" ps [ borrower_alice, agent_charlie ] aliceMandateLetterCid
 
     -- With the consent of the borrower in hand, Charlie can disclose the underwriting report to the lenders,
     -- and request funding based on the report.
@@ -102,14 +107,14 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
     --
     -- NOTE: The existence of the token is divulged to the underwriter, but nothing else.
     aliceMandateLetterTokenCid <- testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_CreateToken
-    testVisibility ps [borrower_alice, agent_charlie] aliceMandateLetterTokenCid
+    testVisibility "AcceptedMandateLetterToken" ps [borrower_alice, agent_charlie] aliceMandateLetterTokenCid
 
     fundingRequests <- forA prospectiveLenders $ \lender -> do
         disclosedUnderwritingReportCid <- testExercise ps agent_charlie aliceUnderwritingCid UnderwritingResult_Disclose with
             disclose_to = lender
             mandateLetterTokenCid = aliceMandateLetterTokenCid
         -- only charlie and this specific lender can see this disclosure
-        testVisibility ps [lender, agent_charlie] disclosedUnderwritingReportCid
+        testVisibility "UnderwritingDisclosure" ps [lender, agent_charlie] disclosedUnderwritingReportCid
 
         -- The disclosure allows charlie to make a funding request without the underwriter knowing who the prospective
         -- lender is.
@@ -118,7 +123,7 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
         fundingRequestCid <- testExercise ps agent_charlie disclosedUnderwritingReportCid MakeFundingRequest with
             requestee = lender
         -- only charlie and this specific lender can see this request
-        testVisibility ps [lender, agent_charlie] fundingRequestCid
+        testVisibility "FundingRequest" ps [lender, agent_charlie] fundingRequestCid
 
         pure (lender, fundingRequestCid)
 
@@ -146,16 +151,16 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
     aliceLoanOfferCid <- testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_CreateOffer with
         rate = fundingSelection_ratePerAnnum
     -- At this point, only the agent and the borrower are aware of the loan offer
-    testVisibility ps [borrower_alice, agent_charlie] aliceLoanOfferCid
+    testVisibility "SyndicatedLoanOffer" ps [borrower_alice, agent_charlie] aliceLoanOfferCid
     -- Even when Alice accepts the loan offer, it is not yet visible to other parties.
     aliceAcceptedLoanOfferCid <- testExercise ps borrower_alice aliceLoanOfferCid SyndicatedLoanOffer_Accept
-    testVisibility ps [borrower_alice, agent_charlie] aliceAcceptedLoanOfferCid
+    testVisibility "AcceptedLoanOffer" ps [borrower_alice, agent_charlie] aliceAcceptedLoanOfferCid
 
     -- With the assent of all parties with consideration, the agent can produce the signed loan agreement, pending settlement details
     signedPendingLoanAgreementCid <- testExercise ps agent_charlie aliceApplicationProcessCid LoanApplicationProcess_CreatePendingLoanAgreement with
         borrower_commitment = aliceAcceptedLoanOfferCid
         lender_commitments = fundingSelection_selected
-    testVisibility ps [borrower_alice, agent_charlie, lender_gary, lender_hortense] signedPendingLoanAgreementCid
+    testVisibility "PendingLoanAgreement" ps [borrower_alice, agent_charlie, lender_gary, lender_hortense] signedPendingLoanAgreementCid
 
     -- Finalize the loan with settlement details! Only the agent can finalize the agreement.
     -- NOTE: This produces a divulgence warning because the borrower can see the application process— and nothing more.
@@ -164,7 +169,7 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
       routeProviderCid
       settlementFactoryCid
       fixedRateBondFactoryCid
-    testVisibility ps [borrower_alice, agent_charlie, lender_gary, lender_hortense] originatedLoanCid
+    testVisibility "OriginatedLoanAgreement" ps [borrower_alice, agent_charlie, lender_gary, lender_hortense] originatedLoanCid
 
     -- Ideally these would be cleaned up upon origination, but this data is otherwise not necessary to include there
     testExercise ps agent_charlie aliceMandateLetterCid AcceptedMandateLetter_Burn
@@ -186,23 +191,26 @@ partiesList = Set.toList . allParties
 -- a contract or fetch it within a transaction.
 testVisibility
     : (HasTemplateTypeRep c, HasFromAnyTemplate c, HasToAnyTemplate c, HasAgreement c)
-    => LedgerParties
+    => Text
+    -> LedgerParties
     -> [Party] -- ^ Who should be able to see the contract?
     -> ContractId c
     -> Script ()
-testVisibility ps shouldSee cid = do
+testVisibility label ps shouldSee cid = do
     let shouldNotSee = filter (`Prelude.notElem` shouldSee) (partiesList ps)
-    forA_ shouldSee $ \party -> do
-        Some _ <- queryContractId party cid
-        pure ()
-    forA_ shouldNotSee $ \party -> do
-        None <- queryContractId party cid
-        pure ()
+    let go = do
+            forA_ shouldSee $ \party -> do
+                Some _ <- queryContractId party cid
+                pure ()
+            forA_ shouldNotSee $ \party -> do
+                None <- queryContractId party cid
+                pure ()
+    test ("Only " <> show shouldSee <> " should see " <> label <> " and " <> show shouldNotSee <> " should not") go
 
 -- | Given a contract, a choice, and a party who should be able to exercise that choice on that contract,
 -- confirms that no other user can exercise that choice and that user can.
 testExercise
-    : (HasExercise t c b, HasFromAnyTemplate t, HasToAnyTemplate t, HasTemplateTypeRep t, HasToAnyChoice t c b, HasFromAnyChoice t c b)
+    : (HasExercise t c b, HasFromAnyTemplate t, HasToAnyTemplate t, HasTemplateTypeRep t, HasToAnyChoice t c b, HasFromAnyChoice t c b, Show c)
     => LedgerParties
     -> Party
     -> ContractId t
@@ -210,6 +218,9 @@ testExercise
     -> Script b
 testExercise ps shouldExercise cid contract_choice = do
     let shouldNotExercise = filter (/= shouldExercise) (partiesList ps)
-    forA_ shouldNotExercise $ \party -> do
-        submitMustFail party $ exerciseCmd cid contract_choice
-    submit shouldExercise $ exerciseCmd cid contract_choice
+        label = T.takeWhile (/=" ") $ show contract_choice
+        go = do
+            forA_ shouldNotExercise $ \party -> do
+                submitMustFail party $ exerciseCmd cid contract_choice
+            submit shouldExercise $ exerciseCmd cid contract_choice
+    test ("Only " <> show shouldExercise <> " should be able to exercise " <> label <> " and " <> show shouldNotExercise <> " should not") go
