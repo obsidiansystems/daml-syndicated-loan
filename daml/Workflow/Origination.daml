@@ -40,7 +40,7 @@ module Workflow.Origination
   )
   where
 
-import Prelude hiding (agreement, key)
+import Prelude hiding (agreement, key, forA)
 
 import DA.Action (foldlA)
 import DA.Date (toGregorian)
@@ -48,6 +48,7 @@ import DA.Map (Map)
 import DA.Map qualified as Map
 import DA.Set qualified as Set
 import DA.Text qualified as T
+import DA.Traversable
 
 import Daml.Finance.Claims.Lifecycle.Rule qualified as LifecycleRule
 import Daml.Finance.Interface.Instrument.Bond.FixedRate.Types (FixedRate(..))
@@ -748,20 +749,20 @@ template OriginatedLoanAgreement
     signatory loanAgreement.agent, loanAgreement.borrower, Map.keys loanAgreement.participantsWithAmounts
     ensure sum (Map.values loanAgreement.participantsWithAmounts) == loanAgreement.loanTerms.amount
 
-    nonconsuming choice OriginatedLoanAgreement_Lifecycle : OriginatedLoanAgreement_LifecycleData
+    nonconsuming choice OriginatedLoanAgreement_Lifecycle : (Optional (ContractId OriginatedLoanAgreement), [ContractId Effect])
       with today : Date
       controller loanAgreement.agent
       do
         let parties = Set.fromList (signatory this)
             updateEvent = clockUpdateEvent parties parties today
         updateEventCid <- toInterfaceContractId <$> create updateEvent
-        (newBondKey, effects) <- exercise lifecycleRule Lifecycle.Evolve with
+        (optionalNewBondKey, effects) <- exercise lifecycleRule Lifecycle.Evolve with
             eventCid = updateEventCid
             instrument = bondKey
             observableCids = []
-        return OriginatedLoanAgreement_LifecycleData with
-          newBondKey
-          effects
+        newThis <- forA optionalNewBondKey $ \newBondKey -> create this with
+          bondKey = newBondKey
+        pure (newThis, effects)
 
 -- Need to provide some proof to P that A gave the loan amount to the same B that was underwritten. Can we do this without revealing B's identity?
 

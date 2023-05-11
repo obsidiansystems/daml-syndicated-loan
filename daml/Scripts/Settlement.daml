@@ -57,8 +57,12 @@ run : Script ()
 run = do
   setTime (time (date 2023 Apr 12) 4 4 4)
   (p, po, o) <- runOrigination
-  () <- settleLoan p po o
-  runBondStep p po o
+  settleLoan p po o
+  let startTime = o.originationTime
+      (y',m',d') = toGregorian (toDateUTC startTime)
+      agent = o.origLoanAgreement.loanAgreement.agent
+  Some origLoanAgreementCid1 <- runBondStep p po agent o.origLoanAgreementCid $ date (y'+1) m' d'
+  Some _origLoanAgreementCid2 <- runBondStep p po agent origLoanAgreementCid1 $ date (y'+2) m' d'
   return ()
 
 -- | Test script that
@@ -67,22 +71,18 @@ run = do
 -- 3. credits a token holding to Alice in her bank account
 -- 4. atomically exchanges the token against the cash holding
 
-runBondStep : LedgerParties -> PreOrigination -> Origination -> Script ()
-runBondStep LedgerParties{..} PreOrigination{..} orig = do
-  let agent = orig.origLoanAgreement.loanAgreement.agent
-      now = orig.originationTime
-  let (y',m',d') = toGregorian (toDateUTC now)
-      today = date (y'+1) m' d'
+runBondStep : LedgerParties -> PreOrigination -> Party -> ContractId OriginatedLoanAgreement -> Date -> Script (Optional (ContractId OriginatedLoanAgreement))
+runBondStep LedgerParties{..} PreOrigination{..} agent origLoanAgreementCid today = do
+  Some origLoanAgreement <- queryContractId agent origLoanAgreementCid
 
-  lifecycleData <- submit agent $ exerciseCmd orig.origLoanAgreementCid OriginatedLoanAgreement_Lifecycle with
+  (newOrigLoanAgreement, [effectCid]) <- submit agent $ exerciseCmd origLoanAgreementCid OriginatedLoanAgreement_Lifecycle with
     today
-
-  let [effectCid] = lifecycleData.effects
 
   processLenderClaim $ LenderClaimConfig with
     agent
-    orig
+    origLoanAgreement
     effectCid
+    bondKey = origLoanAgreement.bondKey
     borrower = borrower_alice
     lender = lender_gary
     lenderLoanAccount = ledgerAccounts.garyLoanAccount
@@ -91,19 +91,21 @@ runBondStep LedgerParties{..} PreOrigination{..} orig = do
 
   _resultCids <- processLenderClaim $ LenderClaimConfig with
     agent
-    orig
+    origLoanAgreement
     effectCid
+    bondKey = origLoanAgreement.bondKey
     borrower = borrower_alice
     lender = lender_hortense
     lenderLoanAccount = ledgerAccounts.hortenseLoanAccount
     lenderCashAccount = ledgerAccounts.hortenseAccount
     borrowerCashAccount = ledgerAccounts.aliceAccount
 
-  return ()
+  return newOrigLoanAgreement
 
 data LenderClaimConfig = LenderClaimConfig with
-  orig : Origination
+  origLoanAgreement : OriginatedLoanAgreement
   effectCid : ContractId Effect
+  bondKey : InstrumentKey
   lender : Party
   lenderLoanAccount : AccountKey
   lenderCashAccount : AccountKey
@@ -115,12 +117,12 @@ processLenderClaim : LenderClaimConfig -> Script ()
 processLenderClaim LenderClaimConfig{..} = do
   Some lenderLoanHoldingCid <- Util.getHoldingOfAmount
     lenderLoanAccount
-    orig.origLoanAgreement.bondKey
+    bondKey
     None
   let lenderLoanHoldingBase = toInterfaceContractId @Holding.Base lenderLoanHoldingCid
 
   claimResult <- submit lender $
-    exerciseCmd orig.origLoanAgreement.claimRule Claim.ClaimEffect with
+    exerciseCmd origLoanAgreement.claimRule Claim.ClaimEffect with
       claimer = lender
       holdingCids = [lenderLoanHoldingBase]
       effectCid
