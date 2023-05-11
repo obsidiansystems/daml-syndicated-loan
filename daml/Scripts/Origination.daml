@@ -13,6 +13,11 @@ import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
 import Util.Display
 import Workflow.Origination
 
+import Scripts.Origination.LoanApplication
+import Scripts.Origination.Mandate
+import Scripts.Origination.Offer
+import Scripts.Origination.Solicitation
+import Scripts.Origination.Underwriting
 import Scripts.Parties
 import Scripts.PreOrigination
 
@@ -25,28 +30,6 @@ data Origination = Origination with
   origLoanAgreementCid : ContractId OriginatedLoanAgreement
   originationTime : Time
 
--- | Submit a loan application to an agent
-createLoanApplication : LoanApplicationSubmission -> Script (ContractId LoanApplicationSubmission)
-createLoanApplication loanApplicationSubmission = do
-  -- Borrower submits an application for a loan
-  application <- submit loanApplicationSubmission.borrower $
-    createCmd loanApplicationSubmission
-  log loanApplicationSubmission
-  pure application
-
--- | Agent accepting a loan application from a borrower
-acceptLoanApplication
-  : Party
-  -> ContractId LoanApplicationSubmission
-  -> Text
-  -> Script (ContractId AcceptedLoanApplication)
-acceptLoanApplication agent application uuid = do
-  result <- submit agent $ exerciseCmd application LoanApplicationSubmission_Accept
-    with
-      uuid
-  logLedger agent result
-  return result
-
 -- | Full origination process of a loan, from application through to acceptance
 -- of a loan offer.
 originate : LedgerParties -> PreOrigination -> Script Origination
@@ -57,7 +40,6 @@ originate LedgerParties{..} PreOrigination{..} = do
       uuid = "LoanInstrument"
       startDate = toDateUTC now
       (y,m,d) = toGregorian startDate
-
       schedule = createPaymentPeriodicSchedule
         (date (y+1) m d)
         []
@@ -76,56 +58,28 @@ originate LedgerParties{..} PreOrigination{..} = do
           durationYears = 10
           schedule
 
-  log "-- Pre-Mandate Application --"
-  -- Borrower submits an application for a loan
-  application <- createLoanApplication loanApplicationSubmission
-  -- Agent accepts it
-  acceptedApplication <- acceptLoanApplication agent_charlie application uuid
+  -- Loan application proposal and acceptance
+  acceptedApplication <- preMandateApplication loanApplicationSubmission uuid
 
-  log "-- Pre-Mandate Processing --"
-  -- Agent kicks off the loan application process
-  applicationProcess <- submit agent_charlie $ exerciseCmd acceptedApplication AcceptedLoanApplication_StartProcess
-  logLedger agent_charlie applicationProcess
-  -- Agent coordinating the lending first asks an underwriter for a report
-  underwritingRequest <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_CreateUnderwritingRequest with
-    underwriter = underwriter_emma
-  logLedger agent_charlie underwritingRequest
-  underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
-  logLedger underwriter_emma underwritingResult
+  -- Loan application processing
+  (applicationProcess, underwritingResult) <- preMandateProcessing acceptedApplication agent_charlie underwriter_emma
 
-  log "-- Mandate Phase --"
-  -- Agent goes back to the borrower with a mandate letter offer
-  mandateLetterOffer <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_OfferMandateLetter with
-    reportCid = underwritingResult
-  logLedger agent_charlie mandateLetterOffer
-  acceptedMandateLetter <- submit borrower_alice $ exerciseCmd mandateLetterOffer MandateLetterOffer_Accept
-  logLedger agent_charlie acceptedMandateLetter
+  -- Agent goes back to the borrower with a mandate letter, which borrower accepts
+  acceptedMandateLetter <- mandatePhase agent_charlie borrower_alice applicationProcess underwritingResult
 
-  log "-- Lender solicitation --"
-  -- Agent with underwriter's report and accepted mandate letter in hand reaches out to possible lenders
+  -- Bid solicitation
   let possibleLenders = [lender_gary, lender_hortense]
-  forA_ possibleLenders $ \lender -> do
-    makeFundingRequest agent_charlie underwritingResult acceptedMandateLetter lender
-  -- Lender declines to make an offer
-  rueFundingRequest <- makeFundingRequest agent_charlie underwritingResult acceptedMandateLetter lender_rue
-  _ <- submit lender_rue $ exerciseCmd rueFundingRequest FundingRequest_Reject
-  -- Lenders make their offers
-  fundingInterestCids <- forA possibleLenders $ \lender -> do
-    [(fundingRequestCid, _fundingRequest)] <- getFundingRequestsFor lender
-    cid <- submit lender $ makeFundingInterest fundingRequestCid (amount / 2.0 + 1.0, rate)
-    logLedger lender cid
-    pure cid
-  fundingInterests <- forA fundingInterestCids $ \cid -> do
-    Some fundingInterest <- queryContractId agent_charlie cid
-    pure (cid, fundingInterest)
+  fundingInterests <- solicitBids
+    agent_charlie
+    possibleLenders
+    [lender_rue] -- Lenders who decline to participate
+    underwritingResult
+    acceptedMandateLetter
+    amount
+    rate
 
-  log "-- Loan Offer --"
-  -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
-  let FundingSelection{..} = selectFundingInterests loanApplicationSubmission fundingInterests
-  loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter fundingSelection_ratePerAnnum
-  logLedger agent_charlie loanProposal
-  acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
-  logLedger borrower_alice acceptedLoan
+  -- Book building and offer of syndicated loan to borrower
+  (fundingSelection, acceptedLoan) <- makeOffer loanApplicationSubmission acceptedMandateLetter fundingInterests
 
   log "-- Pending Loan Agreement --"
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
@@ -133,11 +87,11 @@ originate LedgerParties{..} PreOrigination{..} = do
   signedPendingLoanAgreement <- submit agent_charlie $
     exerciseCmd applicationProcess LoanApplicationProcess_CreatePendingLoanAgreement with
       borrower_commitment = acceptedLoan
-      lender_commitments = fundingSelection_selected
+      lender_commitments = fundingSelection.fundingSelection_selected
   logLedger agent_charlie signedPendingLoanAgreement
 
   -- Agent declines leftover funding interests
-  forA_ fundingSelection_declined $ \declinedCid -> do
+  forA_ fundingSelection.fundingSelection_declined $ \declinedCid -> do
     declined <- queryContractId agent_charlie declinedCid
     case declined of
       None -> pure ()
@@ -161,82 +115,3 @@ originate LedgerParties{..} PreOrigination{..} = do
     origLoanAgreement
     origLoanAgreementCid
     originationTime = now
-
-
-makeUnderwritingResult
-    : Party
-    -> ContractId UnderwritingRequest
-    -> Script (ContractId UnderwritingResult)
-makeUnderwritingResult underwriter requestCid = do
-    submit underwriter $ exerciseCmd requestCid CreateUnderwritingResult with
-      result = True
-
-makeFundingRequest
-    : Party
-    -> ContractId UnderwritingResult
-    -> ContractId AcceptedMandateLetter
-    -> Party
-    -> Script (ContractId FundingRequest)
-makeFundingRequest agent underwriteCid mandateLetterCid lender = do
-    mandateLetterTokenCid <- submit agent $ exerciseCmd mandateLetterCid AcceptedMandateLetter_CreateToken
-    disclosedUnderwriting <- submit agent $ exerciseCmd underwriteCid UnderwritingResult_Disclose with
-        disclose_to = lender
-        mandateLetterTokenCid
-    logLedger agent disclosedUnderwriting
-    fundingRequest <- submit agent $ exerciseCmd disclosedUnderwriting MakeFundingRequest with
-        requestee = lender
-    logLedger agent fundingRequest
-    pure fundingRequest
-
-getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
-getFundingRequestsFor lender = query @FundingRequest lender
-
--- TODO: Actually make a decision about amount and rate
-makeFundingInterest : ContractId FundingRequest -> (Amount, RatePerAnnum) -> Commands (ContractId FundingInterest)
-makeFundingInterest requestCid (amount, rate) = exerciseCmd requestCid FundingRequest_Respond with
-    amount = (amount - 1.0)
-    rate
-
-data FundingSelection = FundingSelection
-  with
-    fundingSelection_ratePerAnnum : RatePerAnnum
-    fundingSelection_selected : Map (ContractId FundingInterest) Amount
-    fundingSelection_declined : [ContractId FundingInterest]
-  deriving (Eq, Ord, Show)
-
-selectFundingInterests : LoanApplicationSubmission -> [(ContractId FundingInterest, FundingInterest)] -> FundingSelection
-selectFundingInterests _ [] = error "No interests to fund loan"
-selectFundingInterests application interests =
-  let sortedInterests = flip L.sortBy interests $ \(_, fi_a) (_, fi_b) -> compare fi_a.rate fi_b.rate
-      (bestRate, book, leftover) = buildBook application 0.0 Map.empty sortedInterests
-   in FundingSelection with
-        fundingSelection_ratePerAnnum = bestRate
-        fundingSelection_selected = book
-        fundingSelection_declined = leftover
-
--- | Given a *SORTED* list of funding interests, sorted from lowest to highest interest rate, gathers commitments
--- until either the loan amount is satisfied, or the loan cannot be constructed for want of funding at an acceptable
--- rate of interest.
-buildBook
-  : LoanApplicationSubmission
-  -> Amount
-  -> Map (ContractId FundingInterest) Amount
-  -> [(ContractId FundingInterest, FundingInterest)]
-  -> (RatePerAnnum, Map (ContractId FundingInterest) Amount, [ContractId FundingInterest])
-buildBook _ _ _ [] = error "Not enough funding interest to construct loan"
-buildBook application accumulatedAmount accumulatedBook ((fundingCid, funding)::fundings) =
-  if funding.rate > application.applicationData.maxInterestRate
-    then error "Not enough funding interest below the maximum interest rate to construct loan"
-    else
-      let remainingRequiredFunding = application.applicationData.amount - accumulatedAmount
-       in if remainingRequiredFunding <= funding.amount
-            then (funding.rate, Map.insertWith (+) fundingCid remainingRequiredFunding accumulatedBook, map fst fundings)
-            else buildBook application (accumulatedAmount + funding.amount) (Map.insertWith (+) fundingCid funding.amount accumulatedBook) fundings
-
-createLoanProposal : ContractId AcceptedMandateLetter -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
-createLoanProposal applicationCid rate = exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
-  rate
-
-acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoanOffer)
-acceptLoanProposal borrower offerCid = do
-  submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
