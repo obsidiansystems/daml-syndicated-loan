@@ -4,7 +4,7 @@ module Scripts.Settlement where
 
 import Daml.Script
 
-import DA.Date (toDateUTC, Month(..), date, toGregorian)
+import DA.Date
 import DA.Foldable
 import DA.Set qualified as Set
 import DA.Map qualified as Map
@@ -19,8 +19,6 @@ import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
 import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
 import Daml.Finance.Settlement.Batch qualified as B
 
-import Scripts.Origination
-import Scripts.Origination.Settlement
 import Scripts.Parties
 import Scripts.PreOrigination
 import Tests.Util qualified as Util
@@ -40,29 +38,6 @@ data SettlementState = SettlementState
     usdInstrument : InstrumentKey
     bondInstrument : InstrumentKey
   deriving (Eq, Show)
-
-runCreateParties : Script LedgerParties
-runCreateParties = createParties
-
-runPreOrigination : Script (LedgerParties, PreOrigination)
-runPreOrigination = do
-  parties <- createParties
-  preOrig <- preOrigination parties
-  pure (parties, preOrig)
-
-runOrigination : Script (LedgerParties, PreOrigination, Origination)
-runOrigination = do
-  (parties, preOrig) <- runPreOrigination
-  orig <- originate parties preOrig
-  pure (parties, preOrig, orig)
-
-run : Script ()
-run = do
-  setTime (time (date 2023 Apr 12) 4 4 4)
-  (p, po, o) <- runOrigination
-  settleLoan p po o
-  let agent = o.origLoanAgreement.loanAgreement.agent
-  runAllBondSteps p po agent o.originationTime o.origLoanAgreementCid 1
 
 runAllBondSteps : LedgerParties -> PreOrigination -> Party -> Time -> ContractId OriginatedLoanAgreement -> Int -> Script ()
 runAllBondSteps p po agent startTime currentOriginatedLoanAgreement yearNum = do

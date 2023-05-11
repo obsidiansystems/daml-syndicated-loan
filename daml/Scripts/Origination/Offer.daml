@@ -1,0 +1,70 @@
+module Scripts.Origination.Offer where
+
+import DA.List qualified as L
+import DA.Map (Map)
+import DA.Map qualified as Map
+import Daml.Script
+
+import Util.Display
+import Workflow.Origination
+
+makeOffer
+  : LoanApplicationSubmission
+  -> ContractId AcceptedMandateLetter
+  -> [(ContractId FundingInterest, FundingInterest)]
+  -> Script ((FundingSelection, ContractId AcceptedLoanOffer))
+makeOffer app acceptedMandateLetter fundingInterests = do
+  -- Offer syndicated loan to borrower
+  log "-- Loan Offer --"
+  -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
+  let fundingSelection@FundingSelection{..} = selectFundingInterests app fundingInterests
+  loanProposal <- submit app.agent $ createLoanProposal acceptedMandateLetter fundingSelection_ratePerAnnum
+  logLedger app.agent loanProposal
+  acceptedLoan <- acceptLoanProposal app.borrower loanProposal
+  logLedger app.borrower acceptedLoan
+  pure (fundingSelection, acceptedLoan)
+
+data FundingSelection = FundingSelection
+  with
+    fundingSelection_ratePerAnnum : RatePerAnnum
+    fundingSelection_selected : Map (ContractId FundingInterest) Decimal
+    fundingSelection_declined : [ContractId FundingInterest]
+  deriving (Eq, Ord, Show)
+
+selectFundingInterests : LoanApplicationSubmission -> [(ContractId FundingInterest, FundingInterest)] -> FundingSelection
+selectFundingInterests _ [] = error "No interests to fund loan"
+selectFundingInterests application interests =
+  let sortedInterests = flip L.sortBy interests $ \(_, fi_a) (_, fi_b) -> compare fi_a.rate fi_b.rate
+      (bestRate, book, leftover) = buildBook application 0.0 Map.empty sortedInterests
+   in FundingSelection with
+        fundingSelection_ratePerAnnum = bestRate
+        fundingSelection_selected = book
+        fundingSelection_declined = leftover
+
+createLoanProposal : ContractId AcceptedMandateLetter -> RatePerAnnum -> Commands (ContractId SyndicatedLoanOffer)
+createLoanProposal applicationCid rate = exerciseCmd applicationCid AcceptedMandateLetter_CreateOffer with
+  rate
+
+acceptLoanProposal : Party -> ContractId SyndicatedLoanOffer -> Script (ContractId AcceptedLoanOffer)
+acceptLoanProposal borrower offerCid = do
+  submit borrower $ exerciseCmd offerCid SyndicatedLoanOffer_Accept
+
+-- | Given a *SORTED* list of funding interests, sorted from lowest to highest
+-- interest rate, gathers commitments until either the loan amount is satisfied,
+-- or the loan cannot be constructed for want of funding at an acceptable rate
+-- of interest.
+buildBook
+  : LoanApplicationSubmission
+  -> Decimal
+  -> Map (ContractId FundingInterest) Decimal
+  -> [(ContractId FundingInterest, FundingInterest)]
+  -> (RatePerAnnum, Map (ContractId FundingInterest) Decimal, [ContractId FundingInterest])
+buildBook _ _ _ [] = error "Not enough funding interest to construct loan"
+buildBook application accumulatedAmount accumulatedBook ((fundingCid, funding)::fundings) =
+  if funding.rate > application.applicationData.maxInterestRate
+    then error "Not enough funding interest below the maximum interest rate to construct loan"
+    else
+      let remainingRequiredFunding = application.applicationData.amount - accumulatedAmount
+       in if remainingRequiredFunding <= funding.amount
+            then (funding.rate, Map.insertWith (+) fundingCid remainingRequiredFunding accumulatedBook, map fst fundings)
+            else buildBook application (accumulatedAmount + funding.amount) (Map.insertWith (+) fundingCid funding.amount accumulatedBook) fundings

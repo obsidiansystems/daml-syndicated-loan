@@ -1,0 +1,63 @@
+module Scripts.Origination.Solicitation where
+
+import DA.Foldable
+import Daml.Script
+
+import Util.Display
+import Workflow.Origination
+
+solicitBids
+  : Party -- ^ Agent
+   -> [Party] -- ^ Possible lenders
+   -> [Party] -- ^ Lenders who decline to participate
+   -> ContractId UnderwritingResult
+   -> ContractId AcceptedMandateLetter
+   -> Decimal -- ^ Total loan amount
+   -> RatePerAnnum -- ^ Interest rate
+   -> Script [(ContractId FundingInterest, FundingInterest)]
+solicitBids agent possibleLenders decliningLenders underwritingResult acceptedMandateLetter total rate = do
+  log "-- Lender solicitation --"
+  -- Agent with underwriter's report and accepted mandate letter in hand reaches out to possible lenders
+  forA_ possibleLenders $ \lender -> do
+    makeFundingRequest agent underwritingResult acceptedMandateLetter lender
+  -- Lender declines to make an offer
+  forA_ decliningLenders $ \rue -> do
+    rueFundingRequest <- makeFundingRequest agent underwritingResult acceptedMandateLetter rue
+    submit rue $ exerciseCmd rueFundingRequest FundingRequest_Reject
+  -- Lenders make their offers
+  fundingInterestCids <- forA possibleLenders $ \lender -> do
+    [(fundingRequestCid, _fundingRequest)] <- getFundingRequestsFor lender
+    cid <- submit lender $ makeFundingInterest fundingRequestCid (total / 2.0 + 1.0, rate)
+    logLedger lender cid
+    pure cid
+  fundingInterests <- forA fundingInterestCids $ \cid -> do
+    Some fundingInterest <- queryContractId agent cid
+    pure (cid, fundingInterest)
+  pure fundingInterests
+
+makeFundingRequest
+    : Party
+    -> ContractId UnderwritingResult
+    -> ContractId AcceptedMandateLetter
+    -> Party
+    -> Script (ContractId FundingRequest)
+makeFundingRequest agent underwriteCid mandateLetterCid lender = do
+    mandateLetterTokenCid <- submit agent $ exerciseCmd mandateLetterCid AcceptedMandateLetter_CreateToken
+    disclosedUnderwriting <- submit agent $ exerciseCmd underwriteCid UnderwritingResult_Disclose with
+        disclose_to = lender
+        mandateLetterTokenCid
+    logLedger agent disclosedUnderwriting
+    fundingRequest <- submit agent $ exerciseCmd disclosedUnderwriting MakeFundingRequest with
+        requestee = lender
+    logLedger agent fundingRequest
+    pure fundingRequest
+
+getFundingRequestsFor : Party -> Script [(ContractId FundingRequest, FundingRequest)]
+getFundingRequestsFor lender = query @FundingRequest lender
+
+-- TODO: Actually make a decision about amount and rate
+makeFundingInterest : ContractId FundingRequest -> (Decimal, RatePerAnnum) -> Commands (ContractId FundingInterest)
+makeFundingInterest requestCid (amount, rate) = exerciseCmd requestCid FundingRequest_Respond with
+    amount = (amount - 1.0)
+    rate
+

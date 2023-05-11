@@ -1,0 +1,37 @@
+module Scripts.Origination.LoanApplication where
+
+import Daml.Script
+
+import Util.Display
+import Workflow.Origination
+
+-- | Submit a loan application to an agent
+createLoanApplication : LoanApplicationSubmission -> Script (ContractId LoanApplicationSubmission)
+createLoanApplication loanApplicationSubmission = do
+  -- Borrower submits an application for a loan
+  application <- submit loanApplicationSubmission.borrower $
+    createCmd loanApplicationSubmission
+  log loanApplicationSubmission
+  pure application
+
+-- | Agent accepting a loan application from a borrower
+acceptLoanApplication
+  : Party
+  -> ContractId LoanApplicationSubmission
+  -> Text
+  -> Script (ContractId AcceptedLoanApplication)
+acceptLoanApplication agent application uuid = do
+  result <- submit agent $ exerciseCmd application LoanApplicationSubmission_Accept
+    with
+      uuid
+  logLedger agent result
+  return result
+
+preMandateApplication : LoanApplicationSubmission -> Text -> Script (ContractId AcceptedLoanApplication)
+preMandateApplication app uuid = do
+  log "-- Pre-Mandate Application --"
+  -- Borrower submits an application for a loan
+  application <- createLoanApplication app
+  -- Agent accepts it
+  acceptedApplication <- acceptLoanApplication (app.agent) application uuid
+  pure acceptedApplication

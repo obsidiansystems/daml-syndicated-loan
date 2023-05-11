@@ -1,0 +1,30 @@
+module Scripts.Origination.Underwriting where
+
+import Daml.Script
+
+import Util.Display
+import Workflow.Origination
+
+preMandateProcessing : ContractId AcceptedLoanApplication -> Party -> Party -> Script (ContractId LoanApplicationProcess, ContractId UnderwritingResult)
+preMandateProcessing acceptedApp agent underwriter = do
+  log "-- Pre-Mandate Application Processing --"
+  -- Agent kicks off the loan application process
+  applicationProcess <- submit agent $ exerciseCmd acceptedApp AcceptedLoanApplication_StartProcess
+  logLedger agent applicationProcess
+  -- Agent coordinating the lending first asks an underwriter for a report
+  underwritingRequest <- submit agent $ exerciseCmd applicationProcess LoanApplicationProcess_CreateUnderwritingRequest with
+    underwriter = underwriter
+  logLedger agent underwritingRequest
+  underwritingResult <- makeUnderwritingResult underwriter underwritingRequest
+  logLedger underwriter underwritingResult
+  pure (applicationProcess, underwritingResult)
+
+makeUnderwritingResult
+    : Party
+    -> ContractId UnderwritingRequest
+    -> Script (ContractId UnderwritingResult)
+makeUnderwritingResult underwriter requestCid = do
+    submit underwriter $ exerciseCmd requestCid CreateUnderwritingResult with
+      result = True
+
+

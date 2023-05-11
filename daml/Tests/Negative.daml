@@ -8,7 +8,7 @@ import Daml.Script
 import Daml.Finance.Interface.Types.Date.Calendar (BusinessDayConventionEnum(Following))
 import Daml.Finance.Interface.Types.Date.RollConvention (PeriodEnum(Y))
 
-import Scripts.Origination
+import Scripts.Origination.Offer
 import Scripts.Parties
 import Scripts.PreOrigination
 import Workflow.Origination

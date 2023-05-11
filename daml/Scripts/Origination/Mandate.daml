@@ -1,0 +1,22 @@
+module Scripts.Origination.Mandate where
+
+import Daml.Script
+
+import Util.Display
+import Workflow.Origination
+
+mandatePhase
+  : Party
+  -> Party
+  -> ContractId LoanApplicationProcess
+  -> ContractId UnderwritingResult
+  -> Script (ContractId AcceptedMandateLetter)
+mandatePhase agent borrower appProcess underwritingResult = do
+  log "-- Mandate Phase --"
+  -- Agent goes back to the borrower with a mandate letter offer
+  mandateLetterOffer <- submit agent $ exerciseCmd appProcess LoanApplicationProcess_OfferMandateLetter with
+    reportCid = underwritingResult
+  logLedger agent mandateLetterOffer
+  acceptedMandateLetter <- submit borrower $ exerciseCmd mandateLetterOffer MandateLetterOffer_Accept
+  logLedger agent acceptedMandateLetter
+  pure acceptedMandateLetter

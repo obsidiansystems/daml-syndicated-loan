@@ -1,0 +1,55 @@
+-- | Acceptance of the loan origination agreement
+module Scripts.Origination.Acceptance where
+
+import DA.Foldable
+import Daml.Script
+
+import Daml.Finance.Interface.Settlement.Factory qualified as Settlement (F)
+import Daml.Finance.Interface.Instrument.Bond.FixedRate.Factory qualified as FixedRate (F)
+import Daml.Finance.Interface.Settlement.RouteProvider qualified as RouteProvider
+
+import Scripts.Origination.Offer
+import Util.Display
+import Workflow.Origination
+
+multipartyAcceptance
+  : Party -- ^ Agent
+  -> ContractId LoanApplicationProcess
+  -> ContractId AcceptedLoanOffer
+  -> FundingSelection
+  -> ContractId RouteProvider.I
+  -> ContractId Settlement.F
+  -> ContractId FixedRate.F
+  -> Time
+  -> Script (ContractId OriginatedLoanAgreement, OriginatedLoanAgreement)
+multipartyAcceptance agent appProcess acceptedLoan fundingSelection routeCid settleCid bondCid now = do
+  log "-- Pending Loan Agreement --"
+  -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
+  -- and gathers the signatures that have been authorized.
+  signedPendingLoanAgreement <- submit agent $
+    exerciseCmd appProcess LoanApplicationProcess_CreatePendingLoanAgreement with
+      borrower_commitment = acceptedLoan
+      lender_commitments = fundingSelection.fundingSelection_selected
+  logLedger agent signedPendingLoanAgreement
+
+  -- Agent declines leftover funding interests
+  forA_ fundingSelection.fundingSelection_declined $ \declinedCid -> do
+    declined <- queryContractId agent declinedCid
+    case declined of
+      None -> pure ()
+      Some dec -> log $ show dec.agent <> " declines offer from " <> show dec.participant
+        <> "\n" <> displayFundingInterestTerms dec
+    submit agent $ exerciseCmd declinedCid FundingInterest_Decline
+
+  -- Agent constructs the final, fully signed loan agreement— ready for settlement
+  origLoanAgreementCid <- submit agent $ exerciseCmd signedPendingLoanAgreement PendingLoanAgreement_Finalize
+    with
+      now
+      routeProviderCid = routeCid
+      settlementFactoryCid = settleCid
+      fixedRateBondFactoryCid = bondCid
+
+  Some origLoanAgreement <- queryContractId agent origLoanAgreementCid
+  log origLoanAgreement
+
+  pure (origLoanAgreementCid, origLoanAgreement)
