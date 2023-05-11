@@ -86,12 +86,11 @@ settleLoan LedgerParties {..} PreOrigination{..} origination = do
       f (accum, map') (icid, routedStep) = do
         let key' = routedStep.sender
             optionalReceiverHoldingCid = Map.lookup (key', routedStep.quantity.unit) map'
-        case optionalReceiverHoldingCid  of
+        case optionalReceiverHoldingCid of
           None -> fail $ "Could not find Holding for " <> show key'
           Some None -> fail $ "Insufficient funds for " <> show key'
           Some (Some receiverHoldingCid) -> do
             SplitResult{splitCids, rest} <- submit key' do
-              -- Check to make sure routedStep is a step dealing with USD Accounts or Bond Accounts
               exerciseCmd (coerceInterfaceContractId @Fungible receiverHoldingCid) Fungible.Split with
                 amounts = [routedStep.quantity.amount]
             assertMsg "we only split a single amount" $ Prelude.length splitCids == 1
