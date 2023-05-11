@@ -2,6 +2,8 @@ join_by () { local IFS="$1"; shift; echo "$*"; }
 declare -a excludedWorkflowModules=(
     '*Daml.Finance.Interface.*'
     '*Daml.Finance.Claims.*'
+    '*Daml.Finance.Data.Time.*'
+    '*Daml.Finance.Lifecycle.*'
 )
 find_modules=$(find $1 -name "*.daml" -type f -print0 | xargs -0 grep -o "import Daml.Finance.*" | grep -Ev "$(join_by "|" ${excludedWorkflowModules[@]})")
 if [[ $? == 0 ]]; then
