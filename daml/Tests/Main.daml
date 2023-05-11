@@ -1,6 +1,8 @@
 module Tests.Main where
 
 import DA.Date (Month(..), date)
+import DA.Exception (GeneralError(..))
+import DA.Set qualified as Set
 import DA.Time (time)
 import Daml.Script
 
@@ -12,6 +14,7 @@ import Scripts.Settlement
 import qualified Tests.FailedUnderwriting
 
 import Tests.IDE
+import Tests.Util
 import Util.Display
 
 -- | Creates parties
@@ -50,6 +53,24 @@ runServicing = do
   runBondSteps p po agent o.originationTime o.origLoanAgreementCid 1 maxSteps >>= \case
     None -> log "-- Repayment Complete --"
     Some _ -> pure ()
+
+-- | Loan repayment with a failure due to insufficient funds.
+runServicingWithNSF : Script ()
+runServicingWithNSF = do
+  setTime (time (date 2023 Apr 12) 4 4 4)
+  (p, po, o) <- runOrigination
+  settleLoan p po o
+  let agent = o.origLoanAgreement.loanAgreement.agent
+      maxSteps = 3
+  -- Simulate Alice spending by just having her and the fed agree to destroy the money.
+  Some holdingToBurn <- getHoldingOfAmount po.ledgerAccounts.aliceAccount po.usdInstrument (Some 28_500_000.0) Set.empty
+  submitMulti [p.fed, p.borrower_alice] [] $ archiveCmd holdingToBurn
+  try 
+    runBondSteps p po agent o.originationTime o.origLoanAgreementCid 1 maxSteps >>= \case
+      None -> log "-- Repayment Complete --"
+      Some _ -> pure ()
+  catch
+    GeneralError {} -> log "-- Caught expected failure --"
 
 -- | Negative underwriting result
 failedUnderwriting : Script ()
