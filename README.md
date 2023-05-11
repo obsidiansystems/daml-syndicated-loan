@@ -42,6 +42,9 @@ This example can be extended in a number of ways, including:
 * Adding agent fees
 * Modeling covenants and loan modifications/acceleration on covenant breach
 * Modeling interest rate modifications (either due to variable rate or as a consequence of contractual terms)
+* More complex disbursements, e.g. triggered by drawing requests and/or conditions (like in a construction loan)
+* Loans in which the identities of the lenders remain private, e.g. for crowdfunding
+* Actions which lenders can perform by voting
 
 ### References
 
