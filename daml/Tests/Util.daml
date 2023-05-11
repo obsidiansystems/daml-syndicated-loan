@@ -9,6 +9,8 @@ import Daml.Script
 import qualified Daml.Finance.Holding.Fungible as Holding
 import qualified Daml.Finance.Interface.Holding.Fungible as IHolding
 import DA.List.Total (head)
+import DA.Set (Set)
+import DA.Set qualified as Set
 import Daml.Finance.Interface.Holding.Fungible (SplitResult(SplitResult))
 
 getAccountHoldings
@@ -28,17 +30,23 @@ getHoldingOfAmount
   -> Optional Decimal
   -- ^ Some: return a Holding of this exact amount
   --   None: merge all account holdings and return this Holding
+  -> Set (ContractId Holding.Fungible)
+  -- ^ Ignore these holdings; this is useful if you want to call this function multiple times before the holdings are consumed
   -> Script (Optional (ContractId Holding.Fungible))
   -- ^ None: insufficient funds, Some: a holding of the specified quantity
-getHoldingOfAmount k currency mQty =
-  case mQty of
-    None ->
-      getAccountHoldings k currency >>= \case
+getHoldingOfAmount k currency mQty ignored = do
+    allHoldings <- getAccountHoldings k currency
+    let usableHoldings = filter ((`Set.notMember` ignored) . fst) allHoldings
+    debugRaw $ "allHoldings = " <> show allHoldings
+    debugRaw $ "ignored = " <> show ignored
+    debugRaw $ "usableHoldings = " <> show usableHoldings
+    case mQty of
+      None -> case usableHoldings of
         [] -> pure None
         [one] -> pure $ Some (fst one)
         first :: rest -> Some <$> merge (fst first) (fst <$> rest)
-    Some qty ->
-      getAccountHoldings k currency >>= letsGo qty
+      Some qty ->
+        letsGo qty usableHoldings
   where
     letsGo qty holdings
       | sum (map ((.amount) . snd) holdings) < qty =

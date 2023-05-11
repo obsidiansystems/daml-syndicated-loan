@@ -1,9 +1,13 @@
+{-# LANGUAGE MultiWayIf #-}
+
 module Scripts.Settlement where
 
 import Daml.Script
 
 import DA.Date (toDateUTC, Month(..), date, toGregorian)
+import DA.Foldable
 import DA.Set qualified as Set
+import DA.Map qualified as Map
 import DA.Time (time)
 
 import Daml.Finance.Interface.Holding.Base qualified as Holding (Base)
@@ -13,7 +17,6 @@ import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
 import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction
 import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
 import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
-import Daml.Finance.Settlement.Instruction qualified as Settlement
 import Daml.Finance.Settlement.Batch qualified as B
 
 import Scripts.Origination
@@ -58,12 +61,18 @@ run = do
   setTime (time (date 2023 Apr 12) 4 4 4)
   (p, po, o) <- runOrigination
   settleLoan p po o
-  let startTime = o.originationTime
-      (y',m',d') = toGregorian (toDateUTC startTime)
-      agent = o.origLoanAgreement.loanAgreement.agent
-  Some origLoanAgreementCid1 <- runBondStep p po agent o.origLoanAgreementCid $ date (y'+1) m' d'
-  Some _origLoanAgreementCid2 <- runBondStep p po agent origLoanAgreementCid1 $ date (y'+2) m' d'
-  return ()
+  let agent = o.origLoanAgreement.loanAgreement.agent
+  runAllBondSteps p po agent o.originationTime o.origLoanAgreementCid 1
+
+runAllBondSteps : LedgerParties -> PreOrigination -> Party -> Time -> ContractId OriginatedLoanAgreement -> Int -> Script ()
+runAllBondSteps p po agent startTime currentOriginatedLoanAgreement yearNum = do
+  let (y',m',d') = toGregorian (toDateUTC startTime)
+      newDate = date (y'+yearNum) m' d'
+  setTime (time newDate 4 4 4)
+  result <- runBondStep p po agent currentOriginatedLoanAgreement newDate
+  case result of
+    Some newOriginatedLoanAgreement -> runAllBondSteps p po agent startTime newOriginatedLoanAgreement (yearNum + 1)
+    None -> pure ()
 
 -- | Test script that
 -- 1. executes the `runTransfer` script
@@ -119,6 +128,7 @@ processLenderClaim LenderClaimConfig{..} = do
     lenderLoanAccount
     bondKey
     None
+    Set.empty
   let lenderLoanHoldingBase = toInterfaceContractId @Holding.Base lenderLoanHoldingCid
 
   claimResult <- submit lender $
@@ -129,34 +139,41 @@ processLenderClaim LenderClaimConfig{..} = do
       batchId = Id "Loan interest payment"
 
   -- Allocate and Approve
-  let [bondConsumed, bondProduced, couponProduced] = claimResult.instructionCids
+  let processInstruction instructionCid = do
+        Some instruction <- queryInterfaceContractId agent instructionCid
+        if
+          | instruction.routedStep.sender == lender -> do
+            (instructionCid2, _) <- submit lender $ exerciseCmd instructionCid Instruction.Allocate with
+              actors = Set.fromList [lender]
+              allocation = Pledge lenderLoanHoldingBase
+            submit_ borrower $ exerciseCmd instructionCid2 Instruction.Approve with
+              actors = Set.fromList [borrower]
+              approval = DebitSender
+          | instruction.routedStep.sender == borrower && instruction.routedStep.custodian == borrower -> do
+            (instructionCid2, _) <- submit borrower $ exerciseCmd instructionCid Instruction.Allocate with
+              actors = Set.fromList [borrower]
+              allocation = CreditReceiver
+            submit_ lender $ exerciseCmd instructionCid2 Instruction.Approve with
+              actors = Set.fromList [lender]
+              approval = TakeDelivery lenderLoanAccount
+          | instruction.routedStep.sender == borrower && instruction.routedStep.custodian /= borrower -> do
+            --Note: It would be better to allocate all holdings in one shot above
+            allHoldings <- Util.getAccountHoldings borrowerCashAccount instruction.routedStep.quantity.unit
+            let ignored = Set.fromList $ fst <$> filter ((/=Map.empty) . (.observers) . snd) allHoldings
+            Some borrowerCashUsed <- Util.getHoldingOfAmount
+              borrowerCashAccount
+              instruction.routedStep.quantity.unit
+              (Some instruction.routedStep.quantity.amount)
+              ignored
 
-  (bondConsumed2, _) <- submit lender $ exerciseCmd bondConsumed Instruction.Allocate with
-    actors = Set.fromList [lender]
-    allocation = Pledge lenderLoanHoldingBase
-  submit_ borrower $ exerciseCmd bondConsumed2 Instruction.Approve with
-    actors = Set.fromList [borrower]
-    approval = DebitSender
-
-  (bondProduced2, _) <- submit borrower $ exerciseCmd bondProduced Instruction.Allocate with
-    actors = Set.fromList [borrower]
-    allocation = CreditReceiver
-  submit_ lender $ exerciseCmd bondProduced2 Instruction.Approve with
-    actors = Set.fromList [lender]
-    approval = TakeDelivery lenderLoanAccount
-
-  Some couponProducedInstr <- queryContractId borrower (fromInterfaceContractId @Settlement.Instruction couponProduced)
-  Some borrowerCashUsed <- Util.getHoldingOfAmount
-    borrowerCashAccount
-    couponProducedInstr.routedStep.quantity.unit
-    (Some couponProducedInstr.routedStep.quantity.amount)
-
-  (couponProduced2, _) <- submit borrower $ exerciseCmd couponProduced Instruction.Allocate with
-    actors = Set.fromList [borrower]
-    allocation = Pledge (toInterfaceContractId @Holding.Base borrowerCashUsed)
-  submit_ lender $ exerciseCmd couponProduced2 Instruction.Approve with
-    actors = Set.fromList [lender]
-    approval = TakeDelivery lenderCashAccount
+            (instructionCid2, _) <- submit borrower $ exerciseCmd instructionCid Instruction.Allocate with
+              actors = Set.fromList [borrower]
+              allocation = Pledge (toInterfaceContractId @Holding.Base borrowerCashUsed)
+            submit_ lender $ exerciseCmd instructionCid2 Instruction.Approve with
+              actors = Set.fromList [lender]
+              approval = TakeDelivery lenderCashAccount
+          | otherwise -> fail "Unexpected payment instruction"
+  mapA_ processInstruction claimResult.instructionCids
 
   logLedger
     borrower

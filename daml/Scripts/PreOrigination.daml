@@ -81,7 +81,7 @@ preOrigination parties@(LedgerParties{..}) = do
     (bobAccount, None) <- mkCashAccount borrower_bob 0.0
 
     -- Alice's USD account
-    (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice 10_000_000.00
+    (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice 20_000_000.00
     -- Alices's loan account
     aliceLoanAccount <- makeLoanAccount borrower_alice borrower_alice
 

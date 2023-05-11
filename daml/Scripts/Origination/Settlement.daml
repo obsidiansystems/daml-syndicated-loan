@@ -17,7 +17,6 @@ import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge)
 import Daml.Finance.Interface.Types.Common.Types
 import Daml.Finance.Settlement.Instruction qualified as Settlement
 
-import Util.Display
 import Workflow.CreditAccount qualified as CreditAccount
 import Workflow.SettlementProposal
 
