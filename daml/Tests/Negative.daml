@@ -1,4 +1,4 @@
-odule Tests.Negative where
+module Tests.Negative where
 
 import DA.Date
 import DA.Foldable
@@ -201,7 +201,6 @@ bobNegativeTests ps@LedgerParties{..} PreOrigination{..} = do
             amount = 97_654_321.00
             maxInterestRate = RatePerAnnum 0.05 -- 5% per annum
             prospectus = "Bob will not have enough lenders to get a loan"
-            durationYears = 10
             schedule
 
         bobLoanApplication = LoanApplicationSubmission with
@@ -267,7 +266,7 @@ bobNegativeTests ps@LedgerParties{..} PreOrigination{..} = do
         borrower_commitment = bobAcceptedLoanOfferCid
         lender_commitments = Map.empty
 
-    _ <- submitMustFail agent_charlie do
+    _ <- test "Unsubscribed/insufficiently subscribed loan cannot be finalized" $ submitMustFail agent_charlie do
         exerciseCmd signedPendingLoanAgreementCid PendingLoanAgreement_Finalize with
             now
             routeProviderCid
