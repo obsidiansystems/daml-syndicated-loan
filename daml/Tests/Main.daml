@@ -1,0 +1,38 @@
+module Tests.Main where
+
+import DA.Date (toDateUTC, Month(..), date, toGregorian)
+import DA.Time (time)
+import Daml.Script
+
+import Scripts.Origination
+import Scripts.Origination.Settlement
+import Scripts.Parties
+import Scripts.PreOrigination
+import Scripts.Settlement
+import Tests.Util qualified as Util
+import Util.Display
+import Util.Script
+import Workflow.Origination
+
+runCreateParties : Script LedgerParties
+runCreateParties = createParties
+
+runPreOrigination : Script (LedgerParties, PreOrigination)
+runPreOrigination = do
+  parties <- runCreateParties
+  preOrig <- preOrigination parties
+  pure (parties, preOrig)
+
+runOrigination : Script (LedgerParties, PreOrigination, Origination)
+runOrigination = do
+  (parties, preOrig) <- runPreOrigination
+  orig <- originate parties preOrig
+  pure (parties, preOrig, orig)
+
+runServicing : Script ()
+runServicing = do
+  setTime (time (date 2023 Apr 12) 4 4 4)
+  (p, po, o) <- runOrigination
+  () <- settleLoan p po o
+  runBondStep p po o
+  return ()

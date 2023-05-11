@@ -2,9 +2,8 @@ module Scripts.Settlement where
 
 import Daml.Script
 
-import DA.Date (toDateUTC, Month(..), date, toGregorian)
+import DA.Date
 import DA.Set qualified as Set
-import DA.Time (time)
 
 import Daml.Finance.Interface.Holding.Base qualified as Holding (Base)
 import Daml.Finance.Interface.Lifecycle.Effect (Effect)
@@ -37,29 +36,6 @@ data SettlementState = SettlementState
     usdInstrument : InstrumentKey
     bondInstrument : InstrumentKey
   deriving (Eq, Show)
-
-runCreateParties : Script LedgerParties
-runCreateParties = createParties
-
-runPreOrigination : Script (LedgerParties, PreOrigination)
-runPreOrigination = do
-  parties <- createParties
-  preOrig <- preOrigination parties
-  pure (parties, preOrig)
-
-runOrigination : Script (LedgerParties, PreOrigination, Origination)
-runOrigination = do
-  (parties, preOrig) <- runPreOrigination
-  orig <- originate parties preOrig
-  pure (parties, preOrig, orig)
-
-run : Script ()
-run = do
-  setTime (time (date 2023 Apr 12) 4 4 4)
-  (p, po, o) <- runOrigination
-  () <- settleLoan p po o
-  runBondStep p po o
-  return ()
 
 -- | Test script that
 -- 1. executes the `runTransfer` script
