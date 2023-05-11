@@ -125,6 +125,11 @@ preOrigination parties@(LedgerParties{..}) = do
     -- Gary's loan account
     garyLoanAccount <- makeLoanAccount lender_gary borrower_alice
 
+    -- Rue's USD account
+    (_rueAccount, Some _rueCashHoldingCid) <- mkCashAccount lender_rue 70_000_000.00
+    -- Rue's loan account
+    _rueLoanAccount <- makeLoanAccount lender_rue borrower_alice
+
     -- ...for Alice's Company
     -- Bob's USD account
     (bobAccount, None) <- mkCashAccount borrower_bob 0.0
@@ -229,8 +234,10 @@ originationStep LedgerParties{..} PreOriginationStuff{..} = do
   let possibleLenders = [lender_gary, lender_hortense]
   forA_ possibleLenders $ \lender -> do
     makeFundingRequest agent_charlie underwritingResult acceptedMandateLetter lender
+  -- Lender declines to make an offer
+  rueFundingRequest <- makeFundingRequest agent_charlie underwritingResult acceptedMandateLetter lender_rue
+  _ <- submit lender_rue $ exerciseCmd rueFundingRequest FundingRequest_Reject
   -- Lenders make their offers
-  -- TODO: Lenders declining to make an offer
   fundingInterestCids <- forA possibleLenders $ \lender -> do
     [(fundingRequestCid, _fundingRequest)] <- getFundingRequestsFor lender
     submit lender $ makeFundingInterest fundingRequestCid (amount / 2.0 + 1.0, rate)
