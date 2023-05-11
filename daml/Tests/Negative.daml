@@ -183,8 +183,8 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
 -- Tests put in place to explore unhappy paths every step of the way for loan applicant:
     -- Test that the agent can decline an application
     -- Tests that a loan cannot be approved without lenders committing to the loan
-bobNegativeTests : LedgerParties -> PreOrigination -> Script ()
-bobNegativeTests ps@LedgerParties{..} PreOrigination{..} = do
+rejectionTests : LedgerParties -> PreOrigination -> Script ()
+rejectionTests ps@LedgerParties{..} PreOrigination{..} = do
     now <- getTime
     let startDate = toDateUTC now
         (y,m,d) = toGregorian startDate
