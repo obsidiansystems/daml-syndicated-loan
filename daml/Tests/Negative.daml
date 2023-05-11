@@ -130,7 +130,8 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
     -- Here we will contrive some differing offers.
     fundingInterests <- forA fundingRequests $ \(lender, requestCid) -> do
         Some request <- queryContractId lender requestCid
-        let RatePerAnnum maxRate = request.report.maxInterestRate
+        Some report <- queryContractId lender request.reportCid
+        let RatePerAnnum maxRate = report.report.maxInterestRate
             (amount, rate)
                 | lender == lender_gary = (request.totalApplicationAmount / 3.0 + 1.0, RatePerAnnum (maxRate - 0.005))
                 | lender == lender_hortense = (request.totalApplicationAmount / 1.5 + 1.0, RatePerAnnum maxRate)
