@@ -158,7 +158,6 @@ template AcceptedLoanApplication
       controller agent
       do
         create LoanApplicationProcess with
-          agent
           borrower
           application = this
           applicationCid = self
@@ -178,16 +177,15 @@ instance Display AcceptedLoanApplication where
 -- constructed, will the validity of the loan application be established.
 template LoanApplicationProcess
   with
-    agent : Party
     borrower : Party
     application : AcceptedLoanApplication
     applicationCid : ContractId AcceptedLoanApplication
   where
-    signatory agent
+    signatory application.agent
     nonconsuming choice LoanApplicationProcess_CreateUnderwritingRequest : ContractId UnderwritingRequest
       with
         underwriter : Party
-      controller agent
+      controller application.agent
 
       do
         fetchedApplication <- fetch applicationCid
@@ -220,7 +218,7 @@ template LoanApplicationProcess
       with
         borrower_commitment : ContractId AcceptedLoanOffer
         lender_commitments : Map (ContractId FundingInterest) Decimal
-      controller agent
+      controller application.agent
       do
         acceptedLoanOffer <- fetch borrower_commitment
         let acceptedTerms = acceptedLoanOffer.terms
@@ -230,7 +228,7 @@ template LoanApplicationProcess
           pure (commitment.participant, amount)
         pendingAgreementCid <- create PendingLoanAgreement with
           loanAgreement = LoanAgreement with
-            agent
+            agent = application.agent
             borrower
             loanTerms = acceptedTerms
             participantsWithAmounts = Map.fromList lenderCommitments
@@ -251,7 +249,7 @@ template LoanApplicationProcess
 
 instance Display LoanApplicationProcess where
   display a = T.intercalate "\n" $
-    (show a.agent <> " is processing application " <> display a.applicationCid <> " from " <> show a.borrower) ::
+    (show a.application.agent <> " is processing application " <> display a.applicationCid <> " from " <> show a.borrower) ::
       displayLinesWith ("> " <>) a.application.applicationData
 
 -- | This template represents a request by an agent on behalf of a borrower for an underwriting report.
