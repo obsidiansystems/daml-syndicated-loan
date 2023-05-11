@@ -1,3 +1,4 @@
+-- | Solicitation of funding from agent to lenders
 module Scripts.Origination.Solicitation where
 
 import DA.Foldable
@@ -6,16 +7,21 @@ import Daml.Script
 import Util.Display
 import Workflow.Origination
 
+data SolicitBids = SolicitBids with
+  agent : Party
+  possibleLenders : [Party] -- ^ Lenders who can submit a proposal to participate
+  decliningLenders : [Party] -- ^ Lenders who will decline to participate
+  underwritingResult : ContractId UnderwritingResult
+  acceptedMandateLetter : ContractId AcceptedMandateLetter
+  amount : Decimal -- ^ Total loan amount
+  rate : RatePerAnnum -- ^ Interest rate
+
+-- | Send solicitations to lenders to participate in the syndicated loan
+-- and collect their responses
 solicitBids
-  : Party -- ^ Agent
-   -> [Party] -- ^ Possible lenders
-   -> [Party] -- ^ Lenders who decline to participate
-   -> ContractId UnderwritingResult
-   -> ContractId AcceptedMandateLetter
-   -> Decimal -- ^ Total loan amount
-   -> RatePerAnnum -- ^ Interest rate
-   -> Script [(ContractId FundingInterest, FundingInterest)]
-solicitBids agent possibleLenders decliningLenders underwritingResult acceptedMandateLetter total rate = do
+  : SolicitBids
+  -> Script [(ContractId FundingInterest, FundingInterest)]
+solicitBids SolicitBids{..} = do
   log "-- Lender solicitation --"
   -- Agent with underwriter's report and accepted mandate letter in hand reaches out to possible lenders
   forA_ possibleLenders $ \lender -> do
@@ -23,11 +29,12 @@ solicitBids agent possibleLenders decliningLenders underwritingResult acceptedMa
   -- Lender declines to make an offer
   forA_ decliningLenders $ \rue -> do
     rueFundingRequest <- makeFundingRequest agent underwritingResult acceptedMandateLetter rue
+    log $ show rue <> " declines to participate"
     submit rue $ exerciseCmd rueFundingRequest FundingRequest_Reject
   -- Lenders make their offers
   fundingInterestCids <- forA possibleLenders $ \lender -> do
     [(fundingRequestCid, _fundingRequest)] <- getFundingRequestsFor lender
-    cid <- submit lender $ makeFundingInterest fundingRequestCid (total / 2.0 + 1.0, rate)
+    cid <- submit lender $ makeFundingInterest fundingRequestCid (amount / 2.0 + 1.0, rate)
     logLedger lender cid
     pure cid
   fundingInterests <- forA fundingInterestCids $ \cid -> do
@@ -35,11 +42,15 @@ solicitBids agent possibleLenders decliningLenders underwritingResult acceptedMa
     pure (cid, fundingInterest)
   pure fundingInterests
 
+-- | Request from agent to a particular potential lender for funding
+-- of the loan
 makeFundingRequest
-    : Party
+    : Party -- ^ agent
     -> ContractId UnderwritingResult
+    -- ^ Proof that the agent has performed some underwriting (but DYOR!)
     -> ContractId AcceptedMandateLetter
-    -> Party
+    -- ^ Proof that the agent has a mandate to solicit for the borrower
+    -> Party -- ^ Potential lender
     -> Script (ContractId FundingRequest)
 makeFundingRequest agent underwriteCid mandateLetterCid lender = do
     mandateLetterTokenCid <- submit agent $ exerciseCmd mandateLetterCid AcceptedMandateLetter_CreateToken
@@ -47,7 +58,8 @@ makeFundingRequest agent underwriteCid mandateLetterCid lender = do
         disclose_to = lender
         mandateLetterTokenCid
     logLedger agent disclosedUnderwriting
-    fundingRequest <- submit agent $ exerciseCmd disclosedUnderwriting MakeFundingRequest with
+    fundingRequest <- submit agent $
+      exerciseCmd disclosedUnderwriting MakeFundingRequest with
         requestee = lender
     logLedger agent fundingRequest
     pure fundingRequest
@@ -60,4 +72,3 @@ makeFundingInterest : ContractId FundingRequest -> (Decimal, RatePerAnnum) -> Co
 makeFundingInterest requestCid (amount, rate) = exerciseCmd requestCid FundingRequest_Respond with
     amount = (amount - 1.0)
     rate
-

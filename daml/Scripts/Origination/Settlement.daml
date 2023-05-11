@@ -1,3 +1,4 @@
+-- | Distribution of loan funds and issuance of loan holdings
 module Scripts.Origination.Settlement where
 
 import DA.Action
@@ -17,20 +18,16 @@ import Daml.Finance.Interface.Settlement.Types (Approval(..), Allocation(Pledge)
 import Daml.Finance.Interface.Types.Common.Types
 import Daml.Finance.Settlement.Instruction qualified as Settlement
 
-import Workflow.CreditAccount qualified as CreditAccount
-import Workflow.SettlementProposal
-
+import Scripts.Origination
 import Scripts.Parties
 import Scripts.PreOrigination
-import Scripts.Origination
-import qualified Daml.Finance.Settlement.Batch as B
 import Util.Display
+import Workflow.CreditAccount qualified as CreditAccount
+import Workflow.SettlementProposal
+import qualified Daml.Finance.Settlement.Batch as B
 
-data OriginationSettlement = OriginationSettlement with
-  borrowerAliceUsdHolding : NonEmpty (ContractId Fungible.Fungible)
-  lenderGaryBondHolding : ContractId Fungible.Fungible
-  lenderHortenseBondHolding : ContractId Fungible.Fungible
-
+-- | Distribute loan proceeds to borrower and issue loan holdings to lenders
+-- via settlement process
 settleLoan : LedgerParties -> PreOrigination -> Origination -> Script ()
 settleLoan LedgerParties {..} PreOrigination{..} origination = do
   log "-- Post-Origination Settlement --"
@@ -72,7 +69,6 @@ settleLoan LedgerParties {..} PreOrigination{..} origination = do
     exerciseCmd settlementProposalCid4 Settle
 
   -- Prepare to construct Allocate instructions
-  -- let instructions : Update [Instruction.I] = mapA (\icid -> fetch icid) instructionCids
   instructionViews <- forA instructionCids $ \icid -> do
     iv <- submit borrower_alice $ exerciseCmd icid Instruction.GetView with viewer = borrower_alice
     pure (icid, iv)
