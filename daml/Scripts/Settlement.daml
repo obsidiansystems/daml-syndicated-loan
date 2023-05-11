@@ -39,14 +39,14 @@ data SettlementState = SettlementState
     bondInstrument : InstrumentKey
   deriving (Eq, Show)
 
-runAllBondSteps : LedgerParties -> PreOrigination -> Party -> Time -> ContractId OriginatedLoanAgreement -> Int -> Script ()
-runAllBondSteps p po agent startTime currentOriginatedLoanAgreement yearNum = do
+runBondSteps : LedgerParties -> PreOrigination -> Party -> Time -> ContractId OriginatedLoanAgreement -> Int -> Int -> Script ()
+runBondSteps p po agent startTime currentOriginatedLoanAgreement yearNum maxYearNum = if yearNum > maxYearNum then pure () else do
   let (y',m',d') = toGregorian (toDateUTC startTime)
       newDate = date (y'+yearNum) m' d'
   setTime (time newDate 4 4 4)
   result <- runBondStep p po agent currentOriginatedLoanAgreement newDate
   case result of
-    Some newOriginatedLoanAgreement -> runAllBondSteps p po agent startTime newOriginatedLoanAgreement (yearNum + 1)
+    Some newOriginatedLoanAgreement -> runBondSteps p po agent startTime newOriginatedLoanAgreement (yearNum + 1) maxYearNum
     None -> pure ()
 
 -- | Test script that
