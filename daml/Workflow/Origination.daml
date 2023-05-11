@@ -77,9 +77,6 @@ import Workflow.Util
 -- ### TODO
 --   * Include "start date" of the loan (used to calculate coupon payment dates)
 --      * Equal to the day at which the loan principal amount is transferred to the borrower.
---   * Figure out what to use as the output of this step to be used as input to the servicing process.
---   * Use daml-finance types for specifying e.g. coupon payment schedule (cf. https://docs.daml.com/daml-finance/reference/code-documentation/daml-finance-rst/Daml-Finance-Instrument-Bond-FixedRate-Instrument.html)
---      * Maybe just include the payment schedule in the final output of this whole process (to be used as input for the servicing process)
 
 -- | Rate per annum.
 -- E.g. "3.5% per annum" is represented as 0.035

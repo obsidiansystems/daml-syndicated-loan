@@ -45,6 +45,10 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
     test "Bob cannot submit an application for Alice" $
       submitMustFail borrower_bob $ createCmd aliceLoanApplication
 
+    test "Alice cannot ask for a negative amount loan" $
+      submitMustFail borrower_alice $ createCmd $ aliceLoanApplication with
+        applicationData.amount = -555.2
+
     -- Alice submits her application
 
     aliceSubmittedApplicationCid <- submit borrower_alice $ createCmd aliceLoanApplication
