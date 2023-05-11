@@ -105,7 +105,7 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
     -- and request funding based on the report.
     let prospectiveLenders = [ lender_gary, lender_hortense ]
     
-    -- To prevent the borrower and underwriter from knowing which lenders were approached with requests for funding, we use a token
+    -- To prevent the borrower from knowing which lenders were approached with requests for funding, we use a token
     -- proving that they have consented, without revealing the details of the application or the underwriting.
     --
     -- NOTE: The existence of the token is divulged to the underwriter, but nothing else.
@@ -116,13 +116,11 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
         disclosedUnderwritingReportCid <- testExercise ps agent_charlie aliceUnderwritingCid UnderwritingResult_Disclose with
             disclose_to = lender
             mandateLetterTokenCid = aliceMandateLetterTokenCid
-        -- only charlie and this specific lender can see this disclosure
-        testVisibility "UnderwritingDisclosure" ps [lender, agent_charlie] disclosedUnderwritingReportCid
-
-        -- The disclosure allows charlie to make a funding request without the underwriter knowing who the prospective
-        -- lender is.
-        -- NOTE: Nevertheless, this emits divulgence warnings, as the underwriter is aware of the disclosure.
-        -- We could rearrange the workflow so as to prevent the underwriter from seeing even that, if desired.
+        -- only charlie, the underwriter and this specific lender can see this disclosure
+        -- NOTE: We would prefer for the underwriter to not sign the disclosure, so that funding requests
+        -- are not divulged to them. What would be better is to keep track of the token which authorizes the disclosure,
+        -- and ensure retrospectively at closing time that the agent did not forge the disclosure out of thin air.
+        testVisibility "UnderwritingDisclosure" ps [lender, agent_charlie, underwriter_emma] disclosedUnderwritingReportCid
         fundingRequestCid <- testExercise ps agent_charlie disclosedUnderwritingReportCid MakeFundingRequest with
             requestee = lender
         -- only charlie and this specific lender can see this request
