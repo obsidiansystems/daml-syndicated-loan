@@ -247,14 +247,19 @@ origination LedgerParties{..} PreOrigination{..} = do
   -- Lenders make their offers
   -- TODO: Lenders declining to make an offer
   fundingInterestCids <- forA possibleLenders $ \lender -> do
-    [(fundingRequestCid, fundingRequest)] <- getFundingRequestsFor lender
-    submit lender $ makeFundingInterest lender fundingRequestCid (amount / 2.0 + 1.0, rate)
+    [(fundingRequestCid, _fundingRequest)] <- getFundingRequestsFor lender
+    cid <- submit lender $ makeFundingInterest lender fundingRequestCid (amount / 2.0 + 1.0, rate)
+    logLedger lender cid
+    pure cid
   fundingInterests <- forA fundingInterestCids $ \cid -> do
     Some fundingInterest <- queryContractId agent_charlie cid
     pure (cid, fundingInterest)
+
+  log "-- Loan Offer --"
   -- Agent takes all lending offers and constructs a loan offer for the borrower to consider
   let FundingSelection{..} = selectFundingInterests loanApplicationSubmission fundingInterests
   loanProposal <- submit agent_charlie $ createLoanProposal acceptedMandateLetter uuid fundingSelection_ratePerAnnum
+  logLedger agent_charlie loanProposal
   acceptedLoan <- acceptLoanProposal borrower_alice loanProposal
   -- Now that all parties have agreed to their individual terms, the agent constructs the final loan agreement
   -- and gathers the signatures that have been authorized.

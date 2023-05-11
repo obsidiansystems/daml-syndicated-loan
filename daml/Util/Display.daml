@@ -2,8 +2,9 @@
 module Util.Display where
 
 import Daml.Script
-import qualified DA.Text as T
-import qualified DA.Set as Set
+import DA.Text qualified as T
+import DA.Set qualified as Set
+import DA.List qualified as L
 
 import qualified Daml.Finance.Settlement.Batch as Batch
 import qualified Daml.Finance.Interface.Settlement.Types as Settlement
@@ -46,11 +47,11 @@ showLedger party fallback cid = do
   logSome fallback . fmap show =<< queryContractId party cid
 
 instance Display Batch.Batch where
- display b = T.intercalate "\n" $ 
+ display b = T.intercalate "\n" $
     [ "Batch: " <> show b.id <> " " <> b.description
     , "> Requestors: " <> show (Set.toList  b.requestors)
     , "> Settlers: " <> show (Set.toList b.settlers)
-    , "> Settlement time: " <> optional "N/A" show b.settlementTime 
+    , "> Settlement time: " <> optional "N/A" show b.settlementTime
     , "> Routed steps: " <> show (length b.routedStepsWithInstructionId)
     ] <> map (display . fst) b.routedStepsWithInstructionId
 
@@ -64,13 +65,22 @@ instance Display Settlement.RoutedStep where
     , "->"
     , show r.receiver
     , "-"
-    , show r.quantity.amount
+    , display r.quantity.amount
     , display r.quantity.unit
     , "(Custod. " <> show r.custodian <> ")"
     ]
 
+commaSplits : Text -> Text
+commaSplits x = case T.splitAt 3 x of
+  (chunk, "") -> chunk
+  (chunk, remainder) -> chunk <> "," <> commaSplits remainder
+
 instance Display Decimal where
-  display = show
+  display a =
+    let x = show a
+        nums = T.reverse $ commaSplits $ T.reverse $ T.takeWhile (/=".") x
+        decs = T.dropWhile (/=".") x
+    in nums <> (if T.length decs == 2 then decs <> "0" else decs)
 
 instance Display InstrumentKey where
   display a = show a.id <> " v" <> (T.take 4 a.version)

@@ -503,6 +503,12 @@ template FundingInterest
             exercise agreementCid PendingLoanAgreement_Sign with
               signer = this.participant
 
+instance Display FundingInterest where
+  display a = T.intercalate "\n"
+    [ show a.participant <> " sends offer to " <> show a.agent
+    , "Terms: " <> display a.amount <> " of " <> display a.instrument <> " at " <> display a.rate
+    ]
+
 template SyndicatedLoanOffer
   with
     uuid : Text
@@ -525,6 +531,11 @@ template SyndicatedLoanOffer
           mandateLetterCid
           mandateLetter
           terms
+
+instance Display SyndicatedLoanOffer where
+  display a = T.intercalate "\n" $
+    (show a.mandateLetter.agent <> " sends loan offer to " <> show a.mandateLetter.borrower) ::
+      displayIndent a.mandateLetter.mandateLetter
 
 data LoanTerms = LoanTerms with
     instrument : InstrumentKey
