@@ -130,7 +130,7 @@ runTransfer = do
       amount = 1000.0
       currentOwner = alice
 
-  newHoldingCid <- submitMulti [alice] [public] do
+  newHoldingCid <- submit alice do
     exerciseCmd transferRequestCid Transfer.Accept with holdingCid = aliceCashHoldingCid
   -- TRANSFER_END
 
