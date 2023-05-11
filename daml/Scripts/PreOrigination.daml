@@ -34,13 +34,32 @@ data PreOrigination = PreOrigination with
   aliceCashHoldingCid : ContractId HoldingBase.I
   charlieCashHoldingCid : ContractId HoldingBase.I
 
+data PreOriginationAmounts = PreOriginationAmounts with
+  aliceUsd : Decimal
+  bobUsd : Decimal
+  charlieUsd : Decimal
+  debbieUsd : Decimal
+  garyUsd : Decimal
+  hortenseUsd : Decimal
+  rueUsd : Decimal
+
 -- Pre-origination set-up script that creates:
 -- - the asset in which the loans will be denominated
 -- - the issuer and depository for the asset (for simplicity, they are the same party)
 -- - the accounts for the agents, lenders, and borrowers
 -- - initial assets for the lenders
 preOrigination : LedgerParties -> Script PreOrigination
-preOrigination parties@(LedgerParties{..}) = do
+preOrigination parties = preOriginationWithAmounts parties PreOriginationAmounts with
+  aliceUsd = 20_000_000.00
+  bobUsd = 0.00
+  charlieUsd = 6_000_000_000.00
+  debbieUsd = 0.00
+  garyUsd = 70_000_000.00
+  hortenseUsd = 100_000_000.00
+  rueUsd = 70_000_000.00
+
+preOriginationWithAmounts : LedgerParties -> PreOriginationAmounts -> Script PreOrigination
+preOriginationWithAmounts parties@LedgerParties{..} PreOriginationAmounts{..} = do
     -- USD instrument definition
     let usdInstrument = mkUsd fed
 
@@ -63,35 +82,35 @@ preOrigination parties@(LedgerParties{..}) = do
         makeLoanAccount = makeAccount "Loan" . conf borrower_alice
 
     -- Hortense's USD account
-    (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense 100_000_000.00
+    (hortenseAccount, Some hortenseCashHoldingCid) <- mkCashAccount lender_hortense hortenseUsd
     -- Hortense's loan account
     hortenseLoanAccount <- makeLoanAccount lender_hortense
 
     -- Gary's USD account
-    (garyAccount, Some garyCashHoldingCid) <- mkCashAccount lender_gary 70_000_000.00
+    (garyAccount, Some garyCashHoldingCid) <- mkCashAccount lender_gary garyUsd
     -- Gary's loan account
     garyLoanAccount <- makeLoanAccount lender_gary
 
     -- Rue's USD account
-    (_rueAccount, Some _rueCashHoldingCid) <- mkCashAccount lender_rue 70_000_000.00
+    (_rueAccount, Some _rueCashHoldingCid) <- mkCashAccount lender_rue rueUsd
     -- Rue's loan account
     _rueLoanAccount <- makeLoanAccount lender_rue
 
     -- Bob's USD account
-    (bobAccount, None) <- mkCashAccount borrower_bob 0.0
+    (bobAccount, None) <- mkCashAccount borrower_bob bobUsd
 
     -- Alice's USD account
-    (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice 20_000_000.00
+    (aliceAccount, Some aliceCashHoldingCid) <- mkCashAccount borrower_alice aliceUsd
     -- Alices's loan account
     aliceLoanAccount <- makeLoanAccount borrower_alice
 
     -- ...for Charlie's agency
-    (charlieAccount, Some charlieCashHoldingCid) <- mkCashAccount agent_charlie 6_000_000_000.00
+    (charlieAccount, Some charlieCashHoldingCid) <- mkCashAccount agent_charlie charlieUsd
     -- Charlies's bond account (request)
     charlieLoanAccount <- makeLoanAccount agent_charlie
 
     -- Debbie's USD account
-    (debbieAccount, None) <- mkCashAccount agent_debbie 0.0
+    (debbieAccount, None) <- mkCashAccount agent_debbie debbieUsd
 
     let ledgerAccounts = LedgerAccounts with ..
     return $ PreOrigination with
