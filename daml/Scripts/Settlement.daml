@@ -6,7 +6,7 @@ import DA.Date (toDateUTC, Month(..), date, toGregorian)
 import DA.Set qualified as Set
 import DA.Time (time)
 
-import Daml.Finance.Interface.Holding.Base qualified as Holding (I, Base)
+import Daml.Finance.Interface.Holding.Base qualified as Holding (Base)
 import Daml.Finance.Interface.Lifecycle.Effect (Effect)
 import Daml.Finance.Interface.Lifecycle.Rule.Claim qualified as Claim (ClaimEffect(..))
 import Daml.Finance.Interface.Settlement.Batch qualified as Batch (Settle(..))
