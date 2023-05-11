@@ -70,7 +70,7 @@ template SettlementProposal
       do
         -- TODO: Check to make sure all signatures are in place
         exercise batchCid Batch.Settle with
-          actors = Set.singleton loan.loanAgreement.borrower
+          actors = Set.singleton loan.loanAgreement.agent
 
 settleTransactions :
   (HasField "agent" r1 Party
@@ -121,7 +121,7 @@ settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactor
   -- Instruct settlement
   exercise settlementFactoryCid Settlement.Instruct with
       instructors = Set.fromList $ lendersAndBorrowers
-      settlers = Set.singleton loan.borrower
+      settlers = Set.singleton loan.agent
       id = Id id
       description = "Settlement for " <> id
       contextId = None

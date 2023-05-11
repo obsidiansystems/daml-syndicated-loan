@@ -125,6 +125,7 @@ preOrigination parties@(LedgerParties{..}) = do
     -- Gary's loan account
     garyLoanAccount <- makeLoanAccount lender_gary borrower_alice
 
+    -- ...for Alice's Company
     -- Bob's USD account
     (bobAccount, None) <- mkCashAccount borrower_bob 0.0
 
@@ -133,9 +134,9 @@ preOrigination parties@(LedgerParties{..}) = do
     -- Alices's loan account
     aliceLoanAccount <- makeLoanAccount borrower_alice borrower_alice
 
-    -- Charlie's USD agency
+    -- ...for Charlie's agency
     (charlieAccount, Some charlieCashHoldingCid) <- mkCashAccount agent_charlie 6_000_000_000.00
-    -- Charlies's loan account
+    -- Charlies's bond account (request)
     charlieLoanAccount <- makeLoanAccount agent_charlie borrower_alice
 
     -- Debbie's USD account
@@ -459,8 +460,7 @@ settleLoan LedgerParties {..} preOriginationStuff origination = do
         approval = TakeDelivery approvingPartyAccount
 
   -- Settle batched transactions atomically, now that all parties agree in SettlementProposal Contract
-  -- TODO: Do this without submitMulti
-  settlementBases <- submitMulti [agent_charlie, borrower_alice] [] do
+  settlementBases <- submit agent_charlie do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
   -- Pick out each party's holdings from the list of returned contract id's
