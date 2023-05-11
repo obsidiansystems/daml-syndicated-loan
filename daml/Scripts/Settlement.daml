@@ -37,7 +37,6 @@ data SettlementState = SettlementState
     bobAccount : AccountKey
     usdInstrument : InstrumentKey
     bondInstrument : InstrumentKey
-    bobHoldingCid : ContractId Holding.I
   deriving (Eq, Show)
 
 runCreateParties : Script LedgerParties
