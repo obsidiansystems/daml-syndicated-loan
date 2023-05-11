@@ -168,7 +168,6 @@ data Origination = Origination with
 
 createLoanApplication : LoanApplicationSubmission -> Script (ContractId LoanApplicationSubmission)
 createLoanApplication loanApplicationSubmission = do
-  log "-- Loan application sent to Agent --"
   -- Borrower submits an application for a loan
   application <- submit loanApplicationSubmission.borrower $
     createCmd loanApplicationSubmission
@@ -181,13 +180,11 @@ acceptLoanApplication
   -> Text
   -> Script (ContractId AcceptedLoanApplication)
 acceptLoanApplication agent application uuid = do
-  log "-- Agent accepts application --"
   result <- submit agent $ exerciseCmd application LoanApplicationSubmission_Accept
     with
       uuid
   logLedger agent ("Application not found: " <> show result) result
   return result
-
 
 origination : LedgerParties -> PreOrigination -> Script Origination
 origination LedgerParties{..} PreOrigination{..} = do
@@ -215,16 +212,23 @@ origination LedgerParties{..} PreOrigination{..} = do
           prospectus = "Loan for acquisition of competitor"
           durationYears = 10
           schedule
+
+  log "-- Pre-Mandate Application --"
   -- Borrower submits an application for a loan
   application <- createLoanApplication loanApplicationSubmission
   -- Agent accepts it
   acceptedApplication <- acceptLoanApplication agent_charlie application uuid
+
+  log "-- Pre-Mandate Processing --"
   -- Agent kicks off the loan application process
   applicationProcess <- submit agent_charlie $ exerciseCmd acceptedApplication AcceptedLoanApplication_StartProcess
+  logLedger agent_charlie "Not found" applicationProcess
   -- Agent coordinating the lending first asks an underwriter for a report
   underwritingRequest <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_CreateUnderwritingRequest with
     underwriter = underwriter_emma
+  logLedger agent_charlie "Not found" underwritingRequest
   underwritingResult <- makeUnderwritingResult underwriter_emma underwritingRequest
+  logLedger underwriter_emma "Not found" underwritingResult
   -- Agent goes back to the borrower with a mandate letter offer
   mandateLetterOffer <- submit agent_charlie $ exerciseCmd applicationProcess LoanApplicationProcess_OfferMandateLetter with
     reportCid = underwritingResult

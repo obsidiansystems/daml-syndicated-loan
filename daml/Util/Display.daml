@@ -72,3 +72,6 @@ instance Display AccountKey where
 displayLinesWith : Display a => (Text -> Text) -> a -> [Text]
 displayLinesWith f a =
   (map f (T.lines $ display a))
+
+instance Display (ContractId a) where
+  display = T.take 4 . show
