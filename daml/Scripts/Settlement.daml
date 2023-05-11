@@ -1,5 +1,5 @@
+-- | Settlement process for loan repayment
 {-# LANGUAGE MultiWayIf #-}
-
 module Scripts.Settlement where
 
 import Daml.Script

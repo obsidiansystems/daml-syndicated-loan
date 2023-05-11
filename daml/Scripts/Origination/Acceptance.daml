@@ -12,6 +12,8 @@ import Scripts.Origination.Offer
 import Util.Display
 import Workflow.Origination
 
+-- | Create a multi-party loan agreement between the borrower, agent, and all
+-- accepted lenders
 multipartyAcceptance
   : Party -- ^ Agent
   -> ContractId LoanApplicationProcess
