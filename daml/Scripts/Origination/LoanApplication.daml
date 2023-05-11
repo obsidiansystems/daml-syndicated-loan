@@ -1,3 +1,4 @@
+-- | Submission and acceptance of a loan application, pre-mandate
 module Scripts.Origination.LoanApplication where
 
 import Daml.Script
@@ -27,6 +28,8 @@ acceptLoanApplication agent application uuid = do
   logLedger agent result
   return result
 
+-- | Create and accept the loan application. This is the first step in the
+-- syndication process
 preMandateApplication : LoanApplicationSubmission -> Text -> Script (ContractId AcceptedLoanApplication)
 preMandateApplication app uuid = do
   log "-- Pre-Mandate Application --"

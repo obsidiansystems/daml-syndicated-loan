@@ -1,5 +1,5 @@
+-- | Settlement process for loan repayment
 {-# LANGUAGE MultiWayIf #-}
-
 module Scripts.Settlement where
 
 import Daml.Script
@@ -8,7 +8,6 @@ import DA.Date
 import DA.Foldable
 import DA.Set qualified as Set
 import DA.Map qualified as Map
-import DA.Time (time)
 
 import Daml.Finance.Interface.Holding.Base qualified as Holding (Base)
 import Daml.Finance.Interface.Lifecycle.Effect (Effect)
@@ -43,7 +42,6 @@ runBondSteps : LedgerParties -> PreOrigination -> Party -> Time -> ContractId Or
 runBondSteps p po agent startTime currentOriginatedLoanAgreement yearNum maxYearNum = do
   let (y',m',d') = toGregorian (toDateUTC startTime)
       newDate = date (y'+yearNum) m' d'
-  setTime (time newDate 4 4 4)
   result <- runBondStep p po agent currentOriginatedLoanAgreement newDate
   case result of
     Some newOriginatedLoanAgreement ->

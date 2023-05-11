@@ -10,6 +10,7 @@ module Workflow.Origination
   , AcceptedMandateLetterToken_Burn(..)
   , CreateUnderwritingResult(..)
   , FundingInterest(..)
+  , displayFundingInterest
   , displayFundingInterestTerms
   , FundingInterest_Decline(..)
   , FundingInterest_SignAgreement(..)
@@ -158,7 +159,6 @@ template AcceptedLoanApplication
       controller agent
       do
         create LoanApplicationProcess with
-          agent
           borrower
           application = this
           applicationCid = self
@@ -178,16 +178,15 @@ instance Display AcceptedLoanApplication where
 -- constructed, will the validity of the loan application be established.
 template LoanApplicationProcess
   with
-    agent : Party
     borrower : Party
     application : AcceptedLoanApplication
     applicationCid : ContractId AcceptedLoanApplication
   where
-    signatory agent
+    signatory application.agent
     nonconsuming choice LoanApplicationProcess_CreateUnderwritingRequest : ContractId UnderwritingRequest
       with
         underwriter : Party
-      controller agent
+      controller application.agent
 
       do
         fetchedApplication <- fetch applicationCid
@@ -221,7 +220,7 @@ template LoanApplicationProcess
       with
         borrower_commitment : ContractId AcceptedLoanOffer
         lender_commitments : Map (ContractId FundingInterest) Decimal
-      controller agent
+      controller application.agent
       do
         acceptedLoanOffer <- fetch borrower_commitment
         let acceptedTerms = acceptedLoanOffer.terms
@@ -231,7 +230,7 @@ template LoanApplicationProcess
           pure (commitment.participant, amount)
         pendingAgreementCid <- create PendingLoanAgreement with
           loanAgreement = LoanAgreement with
-            agent
+            agent = application.agent
             borrower
             loanTerms = acceptedTerms
             participantsWithAmounts = Map.fromList lenderCommitments
@@ -252,7 +251,7 @@ template LoanApplicationProcess
 
 instance Display LoanApplicationProcess where
   display a = T.intercalate "\n" $
-    (show a.agent <> " is processing application " <> display a.applicationCid <> " from " <> show a.borrower) ::
+    (show a.application.agent <> " is processing application " <> display a.applicationCid <> " from " <> show a.borrower) ::
       displayLinesWith ("> " <>) a.application.applicationData
 
 -- | This template represents a request by an agent on behalf of a borrower for an underwriting report.
@@ -488,7 +487,6 @@ template UnderwritingDisclosure
           totalApplicationAmount = report.amount
           participant = requestee
           reportCid = self
-          report
 
 instance Display UnderwritingDisclosure where
   display a = "Underwriting report disclosed by " <> show a.agent <> " to " <> show a.participant
@@ -499,7 +497,6 @@ template FundingRequest
     agent : Party
     uuid : Text
     reportCid : ContractId UnderwritingDisclosure
-    report : UnderwritingReport
     totalApplicationAmount : Decimal
     -- ^ Invariant: must be equal to the LoanApplication.amount that is pointed to by this contract's key
     participant : Party
@@ -522,8 +519,6 @@ template FundingRequest
       controller participant
       do
         disclosed <- fetch reportCid
-        assertMsg "Report does not match disclosed report" $
-          disclosed.report == this.report
         assertMsg "Must respond with an interest rate less than the maximum underwritten" $
           rate <= disclosed.report.maxInterestRate
         create FundingInterest with
@@ -531,7 +526,6 @@ template FundingRequest
           uuid
           participant
           reportCid
-          report
           amount
           rate
 
@@ -545,7 +539,6 @@ template FundingInterest
     uuid : Text
     participant : Party
     reportCid : ContractId UnderwritingDisclosure
-    report : UnderwritingReport
     amount : Decimal
     rate : RatePerAnnum
     -- TODO: for now we just reject offers that are greater than LoanApplication.maxInterestRate, but eventually we'd like to accept all offers that makes it possible for the agent to offer a final loan of less than or equal to LoanApplication.maxInterestRate.
@@ -566,7 +559,6 @@ template FundingInterest
         pendingAgreement <- fetch agreementCid
         let loanAgreement = pendingAgreement.loanAgreement
         fetchedDisclosure <- fetch reportCid
-        assertMsg "Report does not match referenced report" $ fetchedDisclosure.report == this.report
         fetchedReport <- fetch fetchedDisclosure.reportCid
         assertMsg "Disclosed report does not match original report" $ fetchedReport.report == fetchedDisclosure.report
         fetchedApplication <- fetch pendingAgreement.applicationCid
@@ -581,15 +573,16 @@ template FundingInterest
             exercise agreementCid PendingLoanAgreement_Sign with
               signer = this.participant
 
-instance Display FundingInterest where
-  display a = T.intercalate "\n"
+
+displayFundingInterest : FundingInterest -> UnderwritingDisclosure -> Text
+displayFundingInterest a b = T.intercalate "\n"
     [ show a.participant <> " sends offer to " <> show a.agent
-    , displayFundingInterestTerms a
+    , displayFundingInterestTerms a b
     ]
 
-displayFundingInterestTerms : FundingInterest -> Text
-displayFundingInterestTerms a =
-    "Terms: " <> display a.amount <> " of " <> display a.report.instrument <> " at " <> display a.rate
+displayFundingInterestTerms : FundingInterest -> UnderwritingDisclosure -> Text
+displayFundingInterestTerms a b = do
+    "Terms: " <> display a.amount <> " of " <> display b.report.instrument <> " at " <> display a.rate
 
 -- | This represents the final loan offer from the agent to the borrower. At this point, the agent
 -- should be sure that they have secured enough funding for the loan.
