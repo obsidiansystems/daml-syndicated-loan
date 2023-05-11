@@ -1,6 +1,6 @@
 module Workflow.Origination
-  ( AcceptedLoan(..)
-  , AcceptedLoan_SignAgreement(..)
+  ( AcceptedLoanOffer(..)
+  , AcceptedLoanOffer_SignAgreement(..)
   , AcceptedLoanApplication(..)
   , AcceptedLoanApplication_StartProcess(..)
   , AcceptedMandateLetter(..)
@@ -15,6 +15,7 @@ module Workflow.Origination
   , LoanAgreement(..)
   , LoanApplicationSubmission(..)
   , LoanApplicationData(..)
+  , LoanApplicationProcess_CreatePendingLoanAgreement(..)
   , LoanApplicationProcess_CreateUnderwritingRequest(..)
   , LoanApplicationProcess_OfferMandateLetter(..)
   , LoanApplicationSubmission_Accept(..)
@@ -37,6 +38,7 @@ module Workflow.Origination
 
 import Prelude hiding (agreement, key)
 
+import DA.Action (foldlA)
 import DA.Date (toGregorian)
 import DA.Map (Map)
 import DA.Map qualified as Map
@@ -207,6 +209,38 @@ template LoanApplicationProcess
             amount = report.report.amount
             durationYears = report.report.durationYears
             prospectus = report.report.prospectus
+    -- NOTE: Consuming— we assume that at this point the state of the application is "take it or leave it"
+    choice LoanApplicationProcess_CreatePendingLoanAgreement : ContractId PendingLoanAgreement
+      with
+        borrower_commitment : ContractId AcceptedLoanOffer
+        lender_commitments : Map (ContractId FundingInterest) Decimal
+      controller agent
+      do
+        acceptedLoanOffer <- fetch borrower_commitment
+        let acceptedTerms = acceptedLoanOffer.terms
+        -- Each lender will verify the agreement when they sign it below
+        lenderCommitments <- forA (Map.toList lender_commitments) $ \(cid, amount) -> do
+          commitment <- fetch cid
+          pure (commitment.participant, amount)
+        pendingAgreementCid <- create PendingLoanAgreement with
+          loanAgreement = LoanAgreement with
+            agent
+            borrower
+            loanTerms = acceptedTerms
+            participantsWithAmounts = Map.fromList lenderCommitments
+            uuid = acceptedLoanOffer.uuid
+            prospectus = acceptedLoanOffer.mandateLetter.mandateLetter.prospectus
+          signed = []
+        signedByBorrower <- exercise borrower_commitment $ AcceptedLoanOffer_SignAgreement with
+          pendingAgreementCid
+        signedPendingAgreement <- foldlA
+          (\agreementCid fundingInterestCid -> exercise fundingInterestCid FundingInterest_SignAgreement with agreementCid)
+          signedByBorrower
+          (Map.keys lender_commitments)
+        -- TODO: Clean up paper trail
+        pure signedPendingAgreement
+
+
 
 template UnderwritingRequest
   with
@@ -481,12 +515,12 @@ template SyndicatedLoanOffer
     observer mandateLetter.borrower
     key (mandateLetter.agent, uuid) : (Party, Text)
     maintainer key._1
-    choice SyndicatedLoanOffer_Accept : ContractId AcceptedLoan
+    choice SyndicatedLoanOffer_Accept : ContractId AcceptedLoanOffer
       controller mandateLetter.borrower
       do
         fetchedMandate <- fetch mandateLetterCid
         assertMsg "Mandate letter must match referenced mandate letter" $ fetchedMandate == this.mandateLetter
-        create AcceptedLoan with
+        create AcceptedLoanOffer with
           uuid
           mandateLetterCid
           mandateLetter
@@ -503,7 +537,7 @@ data LoanTerms = LoanTerms with
     -- ^ Repayment coupon schedule
       deriving (Eq, Show)
 
-template AcceptedLoan
+template AcceptedLoanOffer
   with
     uuid : Text
     mandateLetterCid : ContractId AcceptedMandateLetter
@@ -511,7 +545,7 @@ template AcceptedLoan
     terms : LoanTerms
   where
     signatory mandateLetter.borrower, mandateLetter.agent
-    choice AcceptedLoan_SignAgreement : ContractId PendingLoanAgreement
+    choice AcceptedLoanOffer_SignAgreement : ContractId PendingLoanAgreement
       with
         pendingAgreementCid : ContractId PendingLoanAgreement
       controller mandateLetter.agent
