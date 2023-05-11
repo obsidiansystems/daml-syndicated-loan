@@ -12,8 +12,6 @@ import Scripts.Origination.Settlement
 import Scripts.PreOrigination
 import Scripts.Parties
 
-import Util.Display
-
 data Config = Config with
   instrument : InstrumentKey
   accountFactoryCid : ContractId Account.F
