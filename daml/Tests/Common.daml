@@ -36,7 +36,3 @@ test msg f = do
     a <- f
     debugRaw "PASSED"
     pure a
-
--- | Assert that a given property is true
-property : Text -> Bool -> Script ()
-property msg cond = test msg $ unless cond $ assertFail "FAILED"

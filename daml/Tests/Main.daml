@@ -33,7 +33,7 @@ runServicing = do
   (p, po, o) <- runOrigination
   settleLoan p po o
   let agent = o.origLoanAgreement.loanAgreement.agent
-      maxSteps = 50
+      maxSteps = 3
   runBondSteps p po agent o.originationTime o.origLoanAgreementCid 1 maxSteps >>= \case
     None -> log "-- Repayment Complete --"
     Some _ -> pure ()
