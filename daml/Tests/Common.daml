@@ -20,17 +20,13 @@ module Tests.Common
 import DA.Action
 import DA.Date (date, toGregorian, toDateUTC)
 import DA.Foldable
-import DA.Functor
 import DA.List qualified as L
 import DA.List.Total qualified
 import DA.Map (Map)
 import DA.Map qualified as Map
-import DA.NonEmpty (NonEmpty)
-import DA.NonEmpty qualified as NE
 import DA.Set qualified as Set
 import Daml.Script
 
-import Daml.Finance.Holding.Fungible qualified as Fungible
 import Daml.Finance.Interface.Account.Factory qualified as Account (F)
 import Daml.Finance.Interface.Holding.Base qualified as HoldingBase
 import Daml.Finance.Interface.Holding.Factory qualified as Holding (F)
@@ -498,43 +494,3 @@ settleLoan LedgerParties {..} PreOrigination{..} origination = do
     exerciseCmd allSignatureSettlementCid $ ExecuteSettlement batchCid
 
   pure ()
-  where
-    createFungiblesMap
-      : [(a, Fungible.Fungible)]
-      -> Map.Map Party [(a, Fungible.Fungible)] -- Owner to fungibles
-    createFungiblesMap fungiblesList =
-      Map.fromListWith (++) $ fungiblesList <&> \(a, fungible) ->
-        (fungible.account.owner, [(a, fungible)])
-
-    lookupNonEmptyUsdHoldings : Show a => Party -> Map Party [(a, Fungible.Fungible)] -> Script (NonEmpty (a, Fungible.Fungible))
-    lookupNonEmptyUsdHoldings party settlementFungibleMap =
-      let bondCurrency = origination.origLoanAgreement.bondInstrument.fixedRate.currency
-      in optional
-        (fail $ show party <> " not found in settlementFungibleMap: " <> show settlementFungibleMap)
-        (\values ->
-          optional
-            (fail $ show party <> " has no holdings of " <> show bondCurrency)
-            pure
-            (NE.nonEmpty $ filter ((== bondCurrency) . (.instrument) . snd) values)
-        )
-        (Map.lookup party settlementFungibleMap)
-
-    lookupSingleBondHolding
-      :  ActionFail m
-      => Show a
-      => Party
-      -> Map.Map Party [(a, Fungible.Fungible)]
-      -> m (a, Fungible.Fungible)
-    lookupSingleBondHolding party settlementFungibleMap = optional
-      (fail $ show party <> " not found in settlementFungibleMap: " <> show settlementFungibleMap)
-      (\values ->
-        optional
-          (fail $ show party <> " has no bond holdings")
-          (\nonEmptyBondsList ->
-            if Prelude.length (NE.toList nonEmptyBondsList) == 1
-              then pure $ L.head $ NE.toList nonEmptyBondsList
-              else fail $ "Expected " <> show party <> " to hold exactly one Alice-bond. Found: " <> show (NE.toList nonEmptyBondsList)
-          )
-          (NE.nonEmpty $ filter ((== origination.origLoanAgreement.bondKey) . (.instrument) . snd) values)
-      )
-      (Map.lookup party settlementFungibleMap)
