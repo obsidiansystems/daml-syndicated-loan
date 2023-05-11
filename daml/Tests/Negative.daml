@@ -2,6 +2,7 @@ module Tests.Negative where
 
 import DA.Date
 import DA.Foldable
+import DA.Map qualified as Map
 import DA.Set qualified as Set
 import DA.Text qualified as T
 
@@ -104,7 +105,7 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
     -- With the consent of the borrower in hand, Charlie can disclose the underwriting report to the lenders,
     -- and request funding based on the report.
     let prospectiveLenders = [ lender_gary, lender_hortense ]
-    
+
     -- To prevent the borrower from knowing which lenders were approached with requests for funding, we use a token
     -- proving that they have consented, without revealing the details of the application or the underwriting.
     --
@@ -178,6 +179,101 @@ originationTests ps@LedgerParties{..} PreOrigination{..} = do
     -- NOTE: This produces a divulgence warning because the underwriter can see the token— and nothing more.
     testExercise ps agent_charlie aliceMandateLetterTokenCid AcceptedMandateLetterToken_Burn
     pure originatedLoanCid
+
+-- Tests put in place to explore unhappy paths every step of the way for loan applicant:
+    -- Test that the agent can decline an application
+    -- Tests that a loan cannot be approved without lenders committing to the loan
+bobNegativeTests : LedgerParties -> PreOrigination -> Script ()
+bobNegativeTests ps@LedgerParties{..} PreOrigination{..} = do
+    now <- getTime
+    let startDate = toDateUTC now
+        (y,m,d) = toGregorian startDate
+        schedule = createPaymentPeriodicSchedule
+            (date (y+1) m d)
+            []
+            Following
+            Y 1
+            startDate
+            (date (y+10) m d)
+
+        bobApplicationData = LoanApplicationData with
+            instrument = usdInstrument
+            amount = 97_654_321.00
+            maxInterestRate = RatePerAnnum 0.05 -- 5% per annum
+            prospectus = "Bob will not have enough lenders to get a loan"
+            schedule
+
+        bobLoanApplication = LoanApplicationSubmission with
+            borrower = borrower_bob
+            agent = agent_charlie
+            applicationData = bobApplicationData
+
+    -- Bob submits his application
+    bobSubmittedApplicationCid <- submit borrower_bob $ createCmd bobLoanApplication
+
+    -- Agent rejects Bob's application
+    testExercise ps agent_charlie bobSubmittedApplicationCid LoanApplicationSubmission_Reject
+
+    -- Bob resubmits his application
+    bobReSubmittedApplicationCid <- submit borrower_bob $ createCmd bobLoanApplication
+
+    let bobApplicationUuid = "bob_resubmits_application"
+    bobApplicationCid <- testExercise ps agent_charlie bobReSubmittedApplicationCid LoanApplicationSubmission_Accept with
+        uuid = bobApplicationUuid
+
+    -- Agent start loan process for Bob
+    bobApplicationProcessCid <- testExercise ps agent_charlie bobApplicationCid AcceptedLoanApplication_StartProcess
+
+    -- Agent creates underwriting request for Bob
+    bobUnderwritingRequestCid <- testExercise ps agent_charlie bobApplicationProcessCid LoanApplicationProcess_CreateUnderwritingRequest with
+        underwriter = underwriter_emma
+
+    -- Underwriter approves Bob's loan
+    bobUnderwritingCid <- testExercise ps underwriter_emma bobUnderwritingRequestCid CreateUnderwritingResult with
+      result = True
+
+    -- Agent makes offer to Bob
+    bobMandateLetterOfferCid <- testExercise ps agent_charlie bobApplicationProcessCid LoanApplicationProcess_OfferMandateLetter with
+        reportCid = bobUnderwritingCid
+
+    -- Bob accepts the offer
+    bobMandateLetterCid <- testExercise ps borrower_bob bobMandateLetterOfferCid MandateLetterOffer_Accept
+
+    let prospectiveLenders = [ lender_gary, lender_hortense, lender_rue]
+
+    -- To prevent the borrower and underwriter from knowing which lenders were approached with requests for funding, we use a token
+    -- proving that they have consented, without revealing the details of the application or the underwriting.
+    bobMandateLetterTokenCid <- testExercise ps agent_charlie bobMandateLetterCid AcceptedMandateLetter_CreateToken
+
+    fundingRequests <- forA prospectiveLenders $ \lender -> do
+        disclosedUnderwritingReportCid <- testExercise ps agent_charlie bobUnderwritingCid UnderwritingResult_Disclose with
+            disclose_to = lender
+            mandateLetterTokenCid = bobMandateLetterTokenCid
+        fundingRequestCid <- testExercise ps agent_charlie disclosedUnderwritingReportCid MakeFundingRequest with
+            requestee = lender
+        pure (lender, fundingRequestCid)
+
+    -- All lenders reject this funding request
+    _fundingRejections <- forA fundingRequests $ \(lender, requestCid) -> do
+        testExercise ps lender requestCid FundingRequest_Reject
+
+    bobLoanOfferCid <- testExercise ps agent_charlie bobMandateLetterCid AcceptedMandateLetter_CreateOffer with
+        rate = RatePerAnnum 1.0
+
+    bobAcceptedLoanOfferCid <- testExercise ps borrower_bob bobLoanOfferCid SyndicatedLoanOffer_Accept
+
+    signedPendingLoanAgreementCid <- testExercise ps agent_charlie bobApplicationProcessCid LoanApplicationProcess_CreatePendingLoanAgreement with
+        borrower_commitment = bobAcceptedLoanOfferCid
+        lender_commitments = Map.empty
+
+    _ <- test "Unsubscribed/insufficiently subscribed loan cannot be finalized" $ submitMustFail agent_charlie do
+        exerciseCmd signedPendingLoanAgreementCid PendingLoanAgreement_Finalize with
+            now
+            routeProviderCid
+            settlementFactoryCid
+            fixedRateBondFactoryCid
+
+    return ()
 
 
 -- Explicitly deconstruct the ledger parties so that if it changes, we notice to include them

@@ -25,6 +25,7 @@ module Workflow.Origination
   , LoanApplicationProcess_CreateUnderwritingRequest(..)
   , LoanApplicationProcess_OfferMandateLetter(..)
   , LoanApplicationSubmission_Accept(..)
+  , LoanApplicationSubmission_Reject(..)
   , MakeFundingRequest(..)
   , MandateLetterOffer_Accept(..)
   , MandateLetterOffer_Reject(..)
