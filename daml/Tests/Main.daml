@@ -1,6 +1,6 @@
 module Tests.Main where
 
-import DA.Date (toDateUTC, Month(..), date, toGregorian)
+import DA.Date (Month(..), date)
 import DA.Time (time)
 import Daml.Script
 
@@ -9,10 +9,6 @@ import Scripts.Origination.Settlement
 import Scripts.Parties
 import Scripts.PreOrigination
 import Scripts.Settlement
-import Tests.Util qualified as Util
-import Util.Display
-import Util.Script
-import Workflow.Origination
 
 runCreateParties : Script LedgerParties
 runCreateParties = createParties

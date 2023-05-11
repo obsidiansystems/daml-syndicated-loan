@@ -16,7 +16,6 @@ import Daml.Finance.Settlement.Instruction qualified as Settlement
 import Daml.Finance.Settlement.Batch qualified as B
 
 import Scripts.Origination
-import Scripts.Origination.Settlement
 import Scripts.Parties
 import Scripts.PreOrigination
 import Tests.Util qualified as Util
