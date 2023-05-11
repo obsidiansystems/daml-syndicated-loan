@@ -46,7 +46,7 @@ runPreOrigination = do
 runOrigination : Script (LedgerParties, PreOrigination, Origination)
 runOrigination = do
   (parties, preOrig) <- runPreOrigination
-  orig <- origination parties preOrig
+  orig <- originationStep parties preOrig
   pure (parties, preOrig, orig)
 
 run : Script ()
@@ -65,21 +65,20 @@ run = do
 
 runBondStep : LedgerParties -> PreOrigination -> Origination -> OriginationSettlement -> Script ()
 runBondStep LedgerParties{..} PreOrigination{..} orig OriginationSettlement{..} = do
-  let borrower = orig.loanAgreement.agreement.borrower
-      lender = lender_gary
-      agent = orig.loanAgreement.agreement.agent
+  let borrower = orig.origLoanAgreement.loanAgreement.borrower
+      agent = orig.origLoanAgreement.loanAgreement.agent
       now = orig.originationTime
   let (y',m',d') = toGregorian (toDateUTC now)
       today = date (y'+1) m' d'
 
-  lifecycleData <- submit agent $ exerciseCmd orig.loanAgreementCid OriginatedLoanAgreement_Lifecycle with
+  lifecycleData <- submit agent $ exerciseCmd orig.origLoanAgreementCid OriginatedLoanAgreement_Lifecycle with
     today
 
   let lenderGaryBondHoldingBase = toInterfaceContractId @Holding.Base lenderGaryBondHolding
       [effectCid] = lifecycleData.effects
-  
+
   claimResult <- submit lender_gary $
-    exerciseCmd orig.loanAgreement.claimRule Claim.ClaimEffect with
+    exerciseCmd orig.origLoanAgreement.claimRule Claim.ClaimEffect with
       claimer = lender_gary
       holdingCids = [lenderGaryBondHoldingBase]
       effectCid
@@ -88,8 +87,8 @@ runBondStep LedgerParties{..} PreOrigination{..} orig OriginationSettlement{..} 
   -- Allocate and Approve
   let [bondConsumed, bondProduced, couponProduced] = claimResult.instructionCids
 
-  (bondConsumed2, _) <- submit lender $ exerciseCmd bondConsumed Instruction.Allocate with
-    actors = Set.fromList [lender]
+  (bondConsumed2, _) <- submit lender_gary $ exerciseCmd bondConsumed Instruction.Allocate with
+    actors = Set.fromList [lender_gary]
     allocation = Pledge lenderGaryBondHoldingBase
   submit_ borrower $ exerciseCmd bondConsumed2 Instruction.Approve with
     actors = Set.fromList [borrower]
@@ -98,15 +97,15 @@ runBondStep LedgerParties{..} PreOrigination{..} orig OriginationSettlement{..} 
   (bondProduced2, _) <- submit borrower $ exerciseCmd bondProduced Instruction.Allocate with
     actors = Set.fromList [borrower]
     allocation = CreditReceiver
-  submit_ lender $ exerciseCmd bondProduced2 Instruction.Approve with
-    actors = Set.fromList [lender]
+  submit_ lender_gary $ exerciseCmd bondProduced2 Instruction.Approve with
+    actors = Set.fromList [lender_gary]
     approval = TakeDelivery ledgerAccounts.garyLoanAccount
 
   (couponProduced2, _) <- submit borrower $ exerciseCmd couponProduced Instruction.Allocate with
     actors = Set.fromList [borrower]
     allocation = Pledge aliceCashHoldingCid
-  submit_ lender $ exerciseCmd couponProduced2 Instruction.Approve with
-    actors = Set.fromList [lender]
+  submit_ lender_gary $ exerciseCmd couponProduced2 Instruction.Approve with
+    actors = Set.fromList [lender_gary]
     approval = TakeDelivery ledgerAccounts.garyAccount
 
   logLedger
