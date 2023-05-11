@@ -9,6 +9,7 @@ import Scripts.Origination.Settlement
 import Scripts.Parties
 import Scripts.PreOrigination
 import Scripts.Settlement
+import qualified Tests.FailedUnderwriting
 
 import Util.Display
 
@@ -37,3 +38,6 @@ runServicing = do
   runBondSteps p po agent o.originationTime o.origLoanAgreementCid 1 maxSteps >>= \case
     None -> log "-- Repayment Complete --"
     Some _ -> pure ()
+
+failedUnderwriting : Script ()
+failedUnderwriting = Tests.FailedUnderwriting.failedUnderwriting
