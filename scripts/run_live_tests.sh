@@ -27,6 +27,8 @@ runTests () {
     done
 }
 
-declare -a testsToRun=("Tests.Common:perfTest")
+declare -a testsToRun=(
+  "Tests.DamlHub:allTestHub"
+)
 buildDamlDar $1
 runTests $1

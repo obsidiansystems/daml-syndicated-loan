@@ -43,7 +43,6 @@ runBondSteps : LedgerParties -> PreOrigination -> Party -> Time -> ContractId Or
 runBondSteps p po agent startTime currentOriginatedLoanAgreement yearNum maxYearNum = do
   let (y',m',d') = toGregorian (toDateUTC startTime)
       newDate = date (y'+yearNum) m' d'
-  setTime (time newDate 4 4 4)
   result <- runBondStep p po agent currentOriginatedLoanAgreement newDate
   case result of
     Some newOriginatedLoanAgreement ->
