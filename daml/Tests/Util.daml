@@ -37,9 +37,6 @@ getHoldingOfAmount
 getHoldingOfAmount k currency mQty ignored = do
     allHoldings <- getAccountHoldings k currency
     let usableHoldings = filter ((`Set.notMember` ignored) . fst) allHoldings
-    debugRaw $ "allHoldings = " <> show allHoldings
-    debugRaw $ "ignored = " <> show ignored
-    debugRaw $ "usableHoldings = " <> show usableHoldings
     case mQty of
       None -> case usableHoldings of
         [] -> pure None

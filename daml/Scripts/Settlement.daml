@@ -18,7 +18,6 @@ import Daml.Finance.Interface.Settlement.Instruction qualified as Instruction
 import Daml.Finance.Interface.Settlement.Types (Allocation(..), Approval(..))
 import Daml.Finance.Interface.Types.Common.Types (AccountKey, Id(..), InstrumentKey(..))
 import Daml.Finance.Settlement.Batch qualified as B
-import Daml.Finance.Settlement.Instruction qualified as Settlement
 
 import Scripts.Parties
 import Scripts.PreOrigination
