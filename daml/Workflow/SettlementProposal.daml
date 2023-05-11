@@ -21,6 +21,7 @@ import Daml.Finance.Interface.Types.Common.Types
 
 import Workflow.Origination
 
+-- This template is used to accumulate the signatures of all parties, generate transaction steps, and execute the batched transactions atomically
 template SettlementProposal
   with
     loan : OriginatedLoanAgreement
@@ -85,9 +86,9 @@ settleTransactions :
   )
   => r1
   -> [Party]
-  -> Text
-  -> ContractId t1
-  -> ContractId t2
+  -> Text -- ^ Loan Agreement UUID
+  -> ContractId t1 -- ^ ContractId RouteProvider
+  -> ContractId t2 -- ^ ContractId Settlement.Factory
   -> InstrumentKey -- ^ Bond
   -> Update (a , [c])
 settleTransactions loan lendersAndBorrowers id routeProviderCid settlementFactoryCid bondInstrumentKey = do
